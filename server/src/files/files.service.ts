@@ -1,0 +1,203 @@
+import { InjectDrizzle } from '@nestjs/drizzle';
+import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { extname, join } from 'node:path';
+import { eq, like } from 'drizzle-orm';
+import type { Response } from 'express';
+import type { Db } from '../db/database.service.js';
+import { files, records } from '../db/schema.js';
+import type { SafeUser } from '../auth/user.types.js';
+import { AccessService } from '../common/access.service.js';
+import { AuditService } from '../common/audit.service.js';
+import { nowIso } from '../common/dates.js';
+import { bad, forbidden, notFound } from '../common/exceptions.js';
+import { getEntity } from '../meta/entities.js';
+
+export interface UploadedFileInput {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+}
+
+export type FileRow = typeof files.$inferSelect;
+
+export interface BackupFileEntry {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  uploadedBy: string | null;
+  createdAt: string;
+  data: string;
+}
+
+const MAX_SIZE = 15 * 1024 * 1024;
+
+@Injectable()
+export class FilesService implements OnModuleInit {
+  private readonly dir = process.env.UPLOAD_DIR ?? join(process.cwd(), 'data', 'uploads');
+
+  constructor(
+    @InjectDrizzle() private readonly db: Db,
+    private readonly access: AccessService,
+    private readonly audit: AuditService,
+  ) {}
+
+  onModuleInit(): void {
+    if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
+  }
+
+  save(user: SafeUser, file: UploadedFileInput | undefined) {
+    if (!file || !file.size) bad('กรุณาเลือกไฟล์');
+    if (file.size > MAX_SIZE) bad('ไฟล์ต้องมีขนาดไม่เกิน 15 MB');
+    const name = String(file.originalname ?? '').trim().slice(0, 255) || 'file';
+    const ext = extname(name).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
+    const id = crypto.randomUUID();
+    const path = join(this.dir, `${id}${ext}`);
+    writeFileSync(path, file.buffer);
+    const mime = String(file.mimetype ?? '').trim() || 'application/octet-stream';
+    const row: typeof files.$inferInsert = {
+      id,
+      name,
+      mime,
+      size: file.size,
+      path,
+      uploadedBy: user.id,
+      createdAt: nowIso(),
+    };
+    this.db.insert(files).values(row).run();
+    this.audit.log(user, { action: 'upload', entity: 'files', recordId: id, recordCode: name, summary: `อัปโหลดไฟล์ ${name}` });
+    return this.publicFile(row as FileRow);
+  }
+
+  send(user: SafeUser, id: string, res: Response): void {
+    const row = this.db.select().from(files).where(eq(files.id, id)).all()[0];
+    if (!row) notFound('ไม่พบไฟล์');
+    if (!existsSync(row.path)) notFound('ไม่พบไฟล์บนเซิร์ฟเวอร์');
+    if (!this.canRead(user, row)) forbidden('ไม่มีสิทธิ์เข้าถึงไฟล์นี้');
+    res.setHeader('Content-Type', row.mime);
+    res.setHeader('Content-Length', String(row.size));
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(row.name)}`);
+    createReadStream(row.path).pipe(res);
+  }
+
+  remove(user: SafeUser, id: string): { ok: true } {
+    this.access.require(user, 'settings', 'edit');
+    const row = this.db.select().from(files).where(eq(files.id, id)).all()[0];
+    if (!row) notFound('ไม่พบไฟล์');
+    this.db.delete(files).where(eq(files.id, id)).run();
+    try {
+      if (existsSync(row.path)) unlinkSync(row.path);
+    } catch {
+      /* metadata removal is enough */
+    }
+    this.audit.log(user, { action: 'delete', entity: 'files', recordId: id, recordCode: row.name, summary: `ลบไฟล์ ${row.name}` });
+    return { ok: true };
+  }
+
+  private canRead(user: SafeUser, row: FileRow): boolean {
+    if (user.isAdmin) return true;
+    if (row.uploadedBy && row.uploadedBy === user.id) return true;
+    if (this.access.can(user, 'settings', 'view')) return true;
+    const candidates = this.db
+      .select()
+      .from(records)
+      .where(like(records.data, `%${row.id}%`))
+      .all();
+    return candidates.some((record) => {
+      let def;
+      try {
+        def = getEntity(record.entity);
+      } catch {
+        return false;
+      }
+      if (!JSON.stringify(record.data).includes(row.id)) return false;
+      return this.access.canEntity(user, record.entity, 'view') && this.access.canSee(user, def, record);
+    });
+  }
+
+  exportAll(): BackupFileEntry[] {    return this.db
+      .select()
+      .from(files)
+      .all()
+      .filter((row) => existsSync(row.path))
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        mime: row.mime,
+        size: row.size,
+        uploadedBy: row.uploadedBy ?? null,
+        createdAt: row.createdAt,
+        data: readFileSync(row.path).toString('base64'),
+      }));
+  }
+
+  restoreAll(entries: unknown): number {
+    if (!Array.isArray(entries)) return 0;
+    const prepared: { id: string; name: string; mime: string; uploadedBy: string | null; createdAt: string; buffer: Buffer; path: string }[] = [];
+    for (const raw of entries) {
+      if (!raw || typeof raw !== 'object') continue;
+      const entry = raw as Partial<BackupFileEntry>;
+      if (!entry.data || !entry.name) continue;
+      const buffer = Buffer.from(String(entry.data), 'base64');
+      if (!buffer.length) continue;
+      const baseName = String(entry.name).slice(0, 255);
+      const id = /^[A-Za-z0-9-]{8,64}$/.test(String(entry.id ?? '')) ? String(entry.id) : crypto.randomUUID();
+      const ext = extname(baseName).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
+      prepared.push({
+        id,
+        name: baseName,
+        mime: String(entry.mime ?? 'application/octet-stream'),
+        uploadedBy: entry.uploadedBy ?? null,
+        createdAt: String(entry.createdAt ?? nowIso()),
+        buffer,
+        path: join(this.dir, `${id}${ext}`),
+      });
+    }
+    if (entries.length > 0 && prepared.length === 0) return 0;
+
+    mkdirSync(this.dir, { recursive: true });
+    // Write new files first so a failure never destroys existing attachments.
+    for (const file of prepared) writeFileSync(file.path, file.buffer);
+
+    this.db.transaction((tx) => {
+      tx.delete(files).run();
+      for (const file of prepared) {
+        tx.insert(files).values({
+          id: file.id,
+          name: file.name,
+          mime: file.mime,
+          size: file.buffer.length,
+          path: file.path,
+          uploadedBy: file.uploadedBy,
+          createdAt: file.createdAt,
+        }).run();
+      }
+    });
+
+    const keep = new Set(prepared.map((file) => file.path));
+    for (const name of readdirSync(this.dir)) {
+      const path = join(this.dir, name);
+      if (keep.has(path)) continue;
+      try {
+        unlinkSync(path);
+      } catch {
+        /* best effort cleanup */
+      }
+    }
+    return prepared.length;
+  }
+
+  private publicFile(row: FileRow) {
+    return {
+      id: row.id,
+      name: row.name,
+      mime: row.mime,
+      size: row.size,
+      url: `/api/files/${row.id}`,
+      createdAt: row.createdAt,
+    };
+  }
+}

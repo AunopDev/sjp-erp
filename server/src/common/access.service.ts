@@ -1,0 +1,89 @@
+import { InjectDrizzle } from '@nestjs/drizzle';
+import { Injectable } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
+import type { Db } from '../db/database.service.js';
+import { users } from '../db/schema.js';
+import type { SafeUser } from '../auth/user.types.js';
+import { getEntity, type EntityDef } from '../meta/entities.js';
+import { forbidden } from './exceptions.js';
+
+export interface RecordLike {
+  id: string;
+  data: Record<string, unknown>;
+  createdBy?: string | null;
+  deleted?: boolean;
+}
+
+function str(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+@Injectable()
+export class AccessService {
+  constructor(@InjectDrizzle() private readonly db: Db) {}
+
+  can(user: SafeUser, resource: string, action: string): boolean {
+    if (!user.active) return false;
+    if (user.isAdmin) return true;
+    return !!user.perms?.[resource]?.[action];
+  }
+
+  require(user: SafeUser, resource: string, action: string): void {
+    if (!this.can(user, resource, action)) forbidden();
+  }
+
+  canEntity(user: SafeUser, entityKey: string, action: string): boolean {
+    const def = getEntity(entityKey);
+    return !!def && this.can(user, def.resource, action);
+  }
+
+  requireEntity(user: SafeUser, entityKey: string, action: string): EntityDef {
+    const def = getEntity(entityKey);
+    if (!def) forbidden('ไม่พบชนิดข้อมูลนี้');
+    this.require(user, def.resource, action);
+    return def;
+  }
+
+  canSee(user: SafeUser, def: EntityDef, record: RecordLike): boolean {
+    if (!user.active) return false;
+    if (user.isAdmin || user.scope === 'all' || !def.scoped) return true;
+    const data = record.data;
+    const mine =
+      str(data['assignee']) === user.id ||
+      str(data['manager']) === user.id ||
+      record.createdBy === user.id;
+    if (mine) return true;
+    switch (user.scope) {
+      case 'own':
+        return false;
+      case 'team':
+        return !!str(data['team']) && str(data['team']) === user.team;
+      case 'dept': {
+        const ownerId = str(data['assignee']) || str(data['manager']) || record.createdBy || '';
+        if (!ownerId) return false;
+        const owner = this.db.select().from(users).where(eq(users.id, ownerId)).all()[0];
+        return !!owner && !!user.dept && owner.dept === user.dept;
+      }
+      case 'project':
+        return def.key === 'projects'
+          ? user.projectIds.includes(record.id)
+          : user.projectIds.includes(str(data['project']));
+      case 'site':
+        return def.key === 'sites'
+          ? user.siteIds.includes(record.id)
+          : user.siteIds.includes(str(data['site']));
+      default:
+        return false;
+    }
+  }
+
+  requireSee(user: SafeUser, def: EntityDef, record: RecordLike): void {
+    if (!this.canSee(user, def, record)) forbidden('ไม่มีสิทธิ์เข้าถึงรายการนี้');
+  }
+
+  isApprover(user: SafeUser, cfg: { approverRole?: string; approverUser?: string } | null | undefined): boolean {
+    if (!cfg) return false;
+    if (user.isAdmin) return true;
+    return (!!cfg.approverUser && cfg.approverUser === user.id) || (!!cfg.approverRole && cfg.approverRole === user.roleId);
+  }
+}

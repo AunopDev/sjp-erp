@@ -1,0 +1,46 @@
+/* ===== SJP Console look (warm neutrals, brand red, IBM Plex Sans Thai) ===== */
+:root {
+  --bg: #f8f6f5; --card: #ffffff; --ink: #25211d; --muted: #6b635c; --line: #e4dfdb; --line2: #eeeae7;
+  --pri: #e81d25; --pri-d: #c4131b; --pri-l: #fdecec; --bad: #b3261e;
+  font-size: 17px;
+}
+body { background: var(--bg); color: var(--ink); }
+.brand { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 22px 22px 8px; font-size: 24px; font-weight: 700; color: var(--ink); }
+.brand::before { display: none; }
+.brand .logo-sjp { color: var(--pri); font-size: 34px; font-weight: 800; font-style: italic; letter-spacing: -2px; line-height: 1; }
+.brand small { display: block; flex-basis: 100%; font-weight: 400; font-size: 13.5px; color: var(--muted); margin-top: 2px; }
+.side { border-right: 1px solid var(--line); }
+.nav a.active { background: var(--pri-l); color: var(--pri-d); }
+.nav h4 { color: #8a8179; }
+.topbar { background: rgba(255, 255, 255, .95); border-bottom: 1px solid var(--line); }
+.card, .kpi { border-color: var(--line2); box-shadow: 0 1px 2px rgba(37, 33, 29, .05); border-radius: 14px; }
+.btn { border-radius: 10px; border-color: #d8d2cd; }
+.btn:hover:not(:disabled) { background: #f3efec; border-color: #c9c2bb; }
+.btn.primary { box-shadow: 0 2px 8px rgba(232, 29, 37, .25); }
+.btn.danger { color: #b3261e; border-color: #e8b4b0; }
+input, select, textarea { border-color: #d3ccc6; border-radius: 8px; background: #fff; }
+.tabs { background: #ece8e5; }
+.tabs button.active { color: var(--pri-d); }
+.tbl th { color: var(--muted); border-bottom-color: var(--line); }
+.tbl td { border-bottom-color: var(--line2); }
+.mini th { background: #f6f3f1; }
+.kcol { background: #f0ece9; }
+.bar { background: #ece8e5; }
+:focus-visible { outline: 3px solid #25211d !important; outline-offset: 2px; }
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 4px rgba(232, 29, 37, .14); border-color: var(--pri); }
+
+/* login (modelled on the SJP Console sign-in) */
+.login-wrap { position: relative; overflow: hidden; background: #f8f6f5; flex-direction: column; justify-content: center; }
+.login-bg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.login-card { position: relative; z-index: 1; max-width: 420px; padding: 36px 32px 28px; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(37, 33, 29, .06); }
+.login-logo { text-align: center; margin-bottom: 4px; }
+.login-logo b { color: var(--pri); font-size: 56px; font-weight: 800; font-style: italic; letter-spacing: -3px; line-height: 1; }
+.login-card h1 { text-align: center; color: var(--ink); font-size: 26px; margin-bottom: 4px; }
+.login-sub { text-align: center; color: var(--muted); font-size: 15px; margin-bottom: 18px; }
+.login-card .btn.primary { width: 100%; margin-top: 18px; min-height: 48px; font-size: 18px; }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 78px; }
+.pw-wrap button { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; font-size: 15px; padding: 6px 10px; border-radius: 6px; }
+.pw-wrap button:hover { background: #f3efec; }
+.login-foot { position: relative; z-index: 1; margin-top: 26px; text-align: center; color: var(--muted); font-size: 14px; }
+.login-note { background: #fff8e6; border: 1px solid #ecd9a0; border-radius: 10px; padding: 8px 12px; font-size: 14.5px; margin-bottom: 14px; color: #6b4e00; }

@@ -1,0 +1,534 @@
+/* Final UX layer: tabs, builder canvas and form-row controls.
+   Imported last so it overrides the earlier visual experiments. */
+
+/* Tabs: compact segmented control, no visible scroll rail. */
+.tabs {
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.tabs button {
+  margin: 0;
+  padding: 8px 15px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tabs button:hover {
+  background: var(--line2);
+  color: var(--ink);
+}
+.tabs button.active {
+  border: 0;
+  background: var(--pri-l);
+  color: var(--pri-d);
+  box-shadow: none;
+  font-weight: 600;
+}
+html[data-theme='dark'] .tabs {
+  background: #1b1715;
+  border-color: #3a2f29;
+}
+html[data-theme='dark'] .tabs button:hover {
+  background: #2a221e;
+}
+html[data-theme='dark'] .tabs button.active {
+  background: #2c2320;
+  color: #ff8f92;
+}
+
+/* Module Builder: friendly parts palette. */
+.b-grid {
+  grid-template-columns: minmax(250px, .9fr) minmax(340px, 1.45fr) minmax(280px, 1fr);
+  gap: 18px;
+}
+.b-grid > .card {
+  padding: 20px;
+  border-radius: 18px;
+}
+.b-grid h3 {
+  font-size: 19px;
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+.b-part {
+  width: 100%;
+  min-height: 62px;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: none;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.b-part:hover:not(:disabled) {
+  border-color: #cdbdb1;
+  background: var(--bg);
+  transform: none;
+}
+.b-part span {
+  font-size: 16px;
+}
+.b-part small {
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 400;
+}
+html[data-theme='dark'] .b-part {
+  background: #211b18;
+  border-color: #3c312b;
+  color: #f2e9e1;
+}
+html[data-theme='dark'] .b-part:hover:not(:disabled) {
+  background: #2a221e;
+  border-color: #5a4a41;
+}
+
+/* Builder canvas rows: theme-aware surfaces instead of hard-coded white. */
+.bf {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: grab;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+.bf:hover {
+  border-color: #cdbdb1;
+  background: var(--bg);
+}
+.bf.sel {
+  border-color: var(--pri);
+  box-shadow: 0 0 0 3px rgba(217, 44, 52, .09);
+}
+.bf .row {
+  gap: 8px;
+  align-items: center;
+}
+.bf .row b {
+  min-width: 0;
+  flex: 1 1 140px;
+  line-height: 1.4;
+}
+.bf .row .muted.small {
+  flex: 0 1 auto;
+}
+.bf .btn.sm {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 9px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  box-shadow: none;
+}
+.bf .btn.sm.danger {
+  border-color: #e4b8b4;
+  background: #fff7f6;
+  color: var(--bad);
+}
+html[data-theme='dark'] .bf {
+  background: #211b18;
+  border-color: #3c312b;
+}
+html[data-theme='dark'] .bf:hover {
+  background: #29211d;
+  border-color: #5a4a41;
+}
+html[data-theme='dark'] .bf.sel {
+  border-color: #e84b52;
+  box-shadow: 0 0 0 3px rgba(232, 75, 82, .14);
+}
+html[data-theme='dark'] .bf .btn.sm {
+  background: #2a221e;
+  border-color: #4a3d35;
+  color: #f2e9e1;
+}
+html[data-theme='dark'] .bf .btn.sm.danger {
+  background: #2d1a18;
+  border-color: #6c3a37;
+  color: #f0a09d;
+}
+html[data-theme='dark'] .bf .btn.sm:disabled {
+  opacity: .35;
+}
+
+@media (max-width: 1100px) {
+  .b-grid {
+    grid-template-columns: minmax(230px, .9fr) minmax(320px, 1.2fr);
+  }
+  .b-grid > .card[aria-label='properties'] {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 760px) {
+  .b-grid {
+    grid-template-columns: 1fr;
+  }
+  .b-grid > .card[aria-label='properties'] {
+    grid-column: auto;
+  }
+  .bf .row b {
+    flex-basis: 100%;
+  }
+}
+
+/* Desktop uses the rail; keep the duplicate shortcut dock for small screens only. */
+@media (min-width: 901px) {
+  .bottombar { display: none; }
+  .main2 { padding-bottom: 28px; }
+}
+
+/* Match the new checkbox and file-picker treatment in the reference app too. */
+input[type=checkbox] {
+  appearance: none;
+  width: 19px;
+  height: 19px;
+  min-height: 0;
+  padding: 0;
+  border: 1.5px solid #b8a89c;
+  border-radius: 5px;
+  background: var(--card);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  accent-color: unset;
+}
+input[type=checkbox]::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  transform: scale(0);
+  transition: transform .1s ease;
+  box-shadow: inset 1em 1em #fff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+input[type=checkbox]:checked { border-color: var(--pri); background: var(--pri); }
+input[type=checkbox]:checked::before { transform: scale(1); }
+input[type=checkbox]:disabled { opacity: .42; cursor: not-allowed; }
+input[type=file] {
+  min-height: 42px;
+  padding: 6px 10px;
+  border: 1px solid #d4c7bc;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 14px;
+}
+input[type=file]::file-selector-button {
+  margin-right: 10px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--line2);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+html[data-theme='dark'] input[type=checkbox] { border-color: #6d5c50; background: #191411; }
+html[data-theme='dark'] input[type=checkbox]:checked { border-color: var(--pri); background: var(--pri); }
+html[data-theme='dark'] input[type=file] { border-color: #4a3d35; background: #191411; color: #c8b8ac; }
+html[data-theme='dark'] input[type=file]::file-selector-button { background: #2a221e; color: #f2e9e1; }
+
+/* Palette overlay used to collide with the sticky .top header class, collapsing it to 66px. */
+.overlay.palette-overlay {
+  position: fixed;
+  inset: 0;
+  height: auto;
+  padding: 10vh 12px 12px;
+  align-items: flex-start;
+  background: rgba(45, 32, 26, .5);
+  backdrop-filter: blur(6px);
+}
+.palette-overlay .palette {
+  width: min(720px, 100%);
+  height: auto;
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+}
+.palette-overlay .palette-list {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+html[data-theme='dark'] .overlay.palette-overlay { background: rgba(0, 0, 0, .66); }
+@media (max-width: 560px) {
+  .overlay.palette-overlay { padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
+  .palette-overlay .palette { max-height: 86vh; }
+}
+
+/* Palette focus and selected row. */
+.palette-input input,
+.palette-input input:focus,
+.palette-input input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.palette-row.on {
+  background: var(--pri-l);
+  color: var(--pri-d);
+}
+html[data-theme='dark'] .palette-row.on {
+  background: rgba(232, 75, 82, .14);
+  color: #ff9a9e;
+}
+
+/* ===== Full labeled sidebar for the reference app ===== */
+.rail {
+  width: 268px;
+  align-items: stretch;
+  padding: 14px 12px 12px;
+  gap: 4px;
+}
+.rail-logo {
+  width: auto;
+  height: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 9px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--pri);
+  text-decoration: none;
+}
+.rail-logo:hover { background: rgba(255, 255, 255, .5); }
+.rail-logo::after { display: none; }
+.rail-logo b {
+  font-size: 31px;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: -2.5px;
+  line-height: 1;
+}
+.rail-brand-text { display: flex; flex-direction: column; min-width: 0; }
+.rail-brand-text strong {
+  color: #3a2f29;
+  font-size: 14px;
+  letter-spacing: .8px;
+  line-height: 1.1;
+}
+.rail-brand-text small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.rail-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 15px;
+  margin: 0;
+  padding: 2px 2px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.rail-nav::-webkit-scrollbar { width: 4px; }
+.rail-nav::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+.rail-group { display: flex; flex-direction: column; gap: 2px; }
+.rail-group h4 {
+  margin: 0 9px 4px;
+  padding: 0;
+  border: 0;
+  color: #998d84;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .35px;
+}
+.rail-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 39px;
+  padding: 8px 9px;
+  border-radius: 11px;
+  color: #4e433c;
+  font-size: 14.5px;
+  line-height: 1.35;
+  text-decoration: none;
+  transition: background .14s ease, color .14s ease;
+}
+.rail-link:hover { background: #f5ede7; color: var(--ink); }
+.rail-link.active {
+  background: var(--pri-l);
+  color: var(--pri-d);
+  font-weight: 600;
+}
+.rail-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  flex-shrink: 0;
+  color: #95877d;
+}
+.rail-link.active .rail-ic { color: var(--pri); }
+.rail-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail-badge {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--pri);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+}
+.rail-foot {
+  flex-shrink: 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+.rail-foot-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 39px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.rail-foot-btn:hover { background: #f5ede7; color: var(--ink); }
+html[data-theme='dark'] .rail-logo:hover,
+html[data-theme='dark'] .rail-link:hover,
+html[data-theme='dark'] .rail-foot-btn:hover { background: #2a221e; }
+html[data-theme='dark'] .rail-brand-text strong { color: #f2e9e1; }
+html[data-theme='dark'] .rail-group h4 { color: #9e8f85; }
+html[data-theme='dark'] .rail-link { color: #d8cbc1; }
+html[data-theme='dark'] .rail-link.active { background: rgba(232, 75, 82, .14); color: #ff9a9e; }
+html[data-theme='dark'] .rail-ic { color: #a4978d; }
+html[data-theme='dark'] .rail-link.active .rail-ic { color: #ff9a9e; }
+@media (min-width: 901px) {
+  .menu-chip { display: none; }
+  .top { padding-left: 20px; }
+}
+@media (max-width: 900px) {
+  .rail { width: 280px; align-items: stretch; padding: 14px 12px; }
+  .rail-logo { flex-direction: row; }
+  .rail-nav { display: flex; }
+}
+
+/* Match the floating rounded sidebar of the new app. */
+.rail {
+  top: 14px;
+  height: calc(100vh - 28px);
+  margin: 14px 0 14px 14px;
+  border: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  border-radius: 22px;
+  box-shadow: 0 1px 1px rgba(71, 50, 36, .04), 0 16px 38px rgba(71, 50, 36, .07);
+}
+@media (max-width: 900px) {
+  .rail { margin: 0; height: 100vh; border-radius: 0 20px 20px 0; }
+}
+
+/* Pinning is only meaningful for the mobile shortcut dock now. */
+@media (min-width: 901px) {
+  .crumbs .star { display: none; }
+}
+
+.bb-item > span:last-child {
+  max-width: 100%;
+  padding: 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+/* Collapsible sidebar */
+.rail { transition: width .18s ease, padding .18s ease; }
+.sidebar-toggle { display: none; flex-shrink: 0; }
+@media (min-width: 901px) {
+  .sidebar-toggle { display: inline-flex; }
+}
+.rail.collapsed {
+  width: 82px;
+  padding: 14px 8px 12px;
+}
+.rail.collapsed .rail-brand-text,
+.rail.collapsed .rail-group h4,
+.rail.collapsed .rail-label,
+.rail.collapsed .rail-foot-btn > span:last-child {
+  display: none;
+}
+.rail.collapsed .rail-logo {
+  justify-content: center;
+  padding: 8px 0 16px;
+}
+.rail.collapsed .rail-nav { gap: 10px; }
+.rail.collapsed .rail-group { gap: 4px; }
+.rail.collapsed .rail-group + .rail-group {
+  padding-top: 10px;
+  border-top: 1px solid var(--line2);
+}
+.rail.collapsed .rail-link {
+  position: relative;
+  justify-content: center;
+  padding: 8px;
+}
+.rail.collapsed .rail-ic { width: auto; }
+.rail.collapsed .rail-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+.rail.collapsed .rail-foot-btn {
+  justify-content: center;
+  padding: 8px;
+}
+html[data-theme='dark'] .rail.collapsed .rail-group + .rail-group {
+  border-top-color: var(--line2);
+}

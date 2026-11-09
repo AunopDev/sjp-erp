@@ -1,0 +1,13 @@
+{
+  "id": "unk_84e6e18a76150ec1",
+  "revision": 1,
+  "question": "ชุดสถานะ Ticket จริง ทีม/แผนก รอบ PM รายการตรวจ และเอกสารบังคับต่อขั้นตอนโครงการ (ใช้ค่าเสนอ/ตัวอย่างจำลองไปก่อน)",
+  "severity": "medium",
+  "domain": "workflow",
+  "status": "open",
+  "probes": [
+    "ถามผู้ใช้ผ่านหน้า ขอบเขตและรอยืนยัน"
+  ],
+  "evidence_for": [],
+  "evidence_against": []
+}

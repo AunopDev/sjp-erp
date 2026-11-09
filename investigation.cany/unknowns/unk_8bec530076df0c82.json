@@ -1,0 +1,14 @@
+{
+  "id": "unk_8bec530076df0c82",
+  "revision": 1,
+  "question": "ผู้อนุมัติ วงเงินอนุมัติ PO และขั้นตอนที่ต้องอนุมัติ คือใคร/เท่าไร",
+  "severity": "high",
+  "domain": "approvals",
+  "status": "open",
+  "probes": [
+    "ถามผู้ใช้",
+    "ตั้งค่าที่ ตั้งค่า > Workflow"
+  ],
+  "evidence_for": [],
+  "evidence_against": []
+}

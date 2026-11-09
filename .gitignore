@@ -1,0 +1,12 @@
+node_modules/
+app/node_modules/
+web/node_modules/
+server/node_modules/
+web/dist/
+server/dist/
+server/data/*.sqlite
+server/data/*.sqlite-*
+server/data/uploads/
+server/.env
+*.log
+build-errors.txt

@@ -1,0 +1,11 @@
+// Public surface of the metadata-driven platform.
+export { newPlatform, registry, createCompany, companiesFor, setMemberRoles, isAdmin, userRoles, access } from './core.js'
+export { bootstrapPlatform, installModule, uninstallModule, setEnabled, upgradeModule, listModules, registerPackage, catalogFor } from './lifecycle.js'
+export { createRecord, updateRecord, deleteRecord, listRecords, publish, registerAction } from './records.js'
+export { getRecord, transition, runReport, menuFor, screenFor, optionsForRef } from './flow.js'
+export { createCustomModule, saveEntity, removeEntity } from './builder.js'
+export { exportModule, importModule } from './packages.js'
+export { handle } from './api.js'
+export { validateManifest } from './manifest.js'
+export { PARTS, COMPONENTS } from './parts.js'
+export { tr, FORMAT_VERSION, PlatformError } from './util.js'

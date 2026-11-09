@@ -1,0 +1,13 @@
+{
+  "id": "unk_909c59397661fe43",
+  "revision": 1,
+  "question": "SLA จริง วิธีนับเวลาเคส (เวลาทำการ/หยุดนาฬิกาตอนรอ) — ช่วง 6–12/24/48/60 ชม. เป็นตัวอย่าง ปิดแจ้งเตือนไว้",
+  "severity": "high",
+  "domain": "sla",
+  "status": "open",
+  "probes": [
+    "ถามผู้ใช้"
+  ],
+  "evidence_for": [],
+  "evidence_against": []
+}

@@ -1,0 +1,47 @@
+/* Light usability pass. Keeps the existing layout; only adds a new login background and a few helpers. */
+
+/* ---------- login background: soft colour wash with floating shapes (replaces the network drawing) ---------- */
+.login-wrap { background: linear-gradient(135deg, #e6f0fb 0%, #f1ebfa 48%, #fdeee4 100%); }
+.login-bg2 { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.login-bg2 i { position: absolute; border-radius: 50%; filter: blur(2px); opacity: .55; }
+.login-bg2 i:nth-child(1) { width: 520px; height: 520px; left: -140px; top: -160px; background: radial-gradient(circle at 35% 35%, #9cc7f5, transparent 70%); }
+.login-bg2 i:nth-child(2) { width: 460px; height: 460px; right: -120px; bottom: -140px; background: radial-gradient(circle at 60% 60%, #f6b79a, transparent 70%); }
+.login-bg2 i:nth-child(3) { width: 300px; height: 300px; right: 18%; top: 8%; background: radial-gradient(circle at 50% 50%, #c9b6f0, transparent 70%); }
+html[data-theme='dark'] .login-wrap { background: linear-gradient(135deg, #101826 0%, #17142a 55%, #261a1c 100%); }
+html[data-theme='dark'] .login-bg2 i { opacity: .28; }
+
+/* ---------- small helpers used by the platform pages ---------- */
+.hint { color: var(--muted); font-size: 15px; margin-top: 2px; }
+.sticky-actions { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 0 4px; margin-top: 18px; background: var(--card); border-top: 1px solid var(--line); }
+.starter-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+
+/* ---------- Module Builder studio ---------- */
+.b-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; padding: 0; }
+.b-step { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--muted); font-size: 15.5px; }
+.b-step b { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--line2); color: var(--muted); font-size: 14px; }
+.b-step.on { border-color: var(--pri); color: var(--ink); font-weight: 700; }
+.b-step.on b { background: var(--pri); color: #fff; }
+.b-step.done b { background: #1f9d57; color: #fff; }
+.b-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.b-tpl { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 14px 16px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); cursor: pointer; font: inherit; }
+.b-tpl:hover:not(:disabled) { border-color: var(--pri); }
+.b-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; align-items: start; margin-bottom: 16px; }
+.b-grid > .card { margin-bottom: 0; }
+.b-part { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; min-height: 0; padding: 8px 12px; }
+.b-part small { font-weight: 400; font-size: 13.5px; }
+.b-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.b-flow em { font-style: normal; padding: 4px 12px; border-radius: 999px; background: var(--pri-l, #eef3fa); border: 1px solid var(--line); }
+.b-flow i { font-style: normal; color: var(--muted); margin: 0 4px; }
+.b-done { border-color: #1f9d57; background: rgba(31, 157, 87, .07); }
+.promo { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 18px 20px; margin-bottom: 18px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); }
+.promo h3 { margin: 0 0 4px; }
+.promo .promo-main { flex: 1 1 280px; }
+.promo .promo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------- accessibility ---------- */
+:focus-visible { outline: 3px solid #1a5fd0; outline-offset: 2px; }
+html[data-theme='dark'] :focus-visible { outline-color: #8ab8ff; }
+.btn.sm, .icon-btn, .star, .rail-item, .bb-item { min-height: 36px; min-width: 36px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

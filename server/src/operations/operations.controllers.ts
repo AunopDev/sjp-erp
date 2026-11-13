@@ -9,25 +9,43 @@ import { PurchasingService } from './purchasing.service.js';
 import { ReportsService } from './reports.service.js';
 import { StockService } from './stock.service.js';
 import { TicketsService } from './tickets.service.js';
+import {
+  ApprovalDecisionDto,
+  AppointmentDto,
+  AppointmentResolveDto,
+  PmGenerateDto,
+  PmSaveDto,
+  PmTemplateDto,
+  PoReceiveDto,
+  PoStatusDto,
+  ProjectCreateDto,
+  ReasonDto,
+  StockMoveDto,
+  StockReceiveDto,
+  TicketAssignDto,
+  TicketCreateDto,
+  TicketNoteDto,
+  TicketStatusDto,
+} from './operations.dto.js';
 
 @Controller('tickets')
 export class TicketsController {
   constructor(private readonly tickets: TicketsService) {}
 
   @Post()
-  create(@CurrentUser() user: SafeUser, @Body() body: Record<string, unknown>) {
-    return this.tickets.create(user, body ?? {});
+  create(@CurrentUser() user: SafeUser, @Body() body: TicketCreateDto) {
+    return this.tickets.create(user, body as unknown as Record<string, unknown>);
   }
 
   @Post(':id/status')
   status(
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
-    @Body() body: { to?: string; comment?: string; fields?: Record<string, unknown> },
+    @Body() body: TicketStatusDto,
   ) {
-    return this.tickets.status(user, id, String(body?.to ?? ''), {
-      comment: body?.comment,
-      fields: body?.fields,
+    return this.tickets.status(user, id, String(body.to ?? ''), {
+      comment: body.comment,
+      fields: body.fields ?? {},
     });
   }
 
@@ -35,23 +53,23 @@ export class TicketsController {
   assign(
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
-    @Body() body: { team?: string; assignee?: string | null; note?: string },
+    @Body() body: TicketAssignDto,
   ) {
-    return this.tickets.assign(user, id, body?.team, body?.assignee, body?.note);
+    return this.tickets.assign(user, id, body.team, body.assignee, body.note);
   }
 
   @Post(':id/notes')
   note(
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
-    @Body() body: { type?: string; text?: string },
+    @Body() body: TicketNoteDto,
   ) {
-    return this.tickets.note(user, id, String(body?.type ?? 'note'), String(body?.text ?? ''));
+    return this.tickets.note(user, id, String(body.type ?? 'note'), String(body.text ?? ''));
   }
 
   @Post(':id/appointments')
-  appointment(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.tickets.addAppointment(user, id, body ?? {});
+  appointment(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: AppointmentDto) {
+    return this.tickets.addAppointment(user, id, body as unknown as Record<string, unknown>);
   }
 
   @Post(':id/appointments/:appointmentId/resolve')
@@ -59,9 +77,9 @@ export class TicketsController {
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
     @Param('appointmentId') appointmentId: string,
-    @Body() body: { status?: string; result?: string },
+    @Body() body: AppointmentResolveDto,
   ) {
-    return this.tickets.resolveAppointment(user, id, appointmentId, String(body?.status ?? 'เสร็จ'), body?.result);
+    return this.tickets.resolveAppointment(user, id, appointmentId, String(body.status ?? 'เสร็จ'), body.result);
   }
 }
 
@@ -70,8 +88,8 @@ export class ProjectsController {
   constructor(private readonly projects: ProjectsService) {}
 
   @Post()
-  create(@CurrentUser() user: SafeUser, @Body() body: Record<string, unknown>) {
-    return this.projects.create(user, body ?? {});
+  create(@CurrentUser() user: SafeUser, @Body() body: ProjectCreateDto) {
+    return this.projects.create(user, body as unknown as Record<string, unknown>);
   }
 
   @Patch(':id/steps/:key')
@@ -90,7 +108,7 @@ export class ProjectsController {
     @Param('id') id: string,
     @Param('key') key: string,
     @Param('action') action: string,
-    @Body() body: { reason?: string },
+    @Body() body: ReasonDto,
   ) {
     const allowed = ['start', 'complete', 'skip', 'reopen'] as const;
     if (!allowed.includes(action as (typeof allowed)[number])) {
@@ -100,8 +118,8 @@ export class ProjectsController {
   }
 
   @Post(':id/close')
-  close(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.projects.close(user, id, String(body?.reason ?? ''));
+  close(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: ReasonDto) {
+    return this.projects.close(user, id, String(body.reason ?? ''));
   }
 }
 
@@ -123,18 +141,18 @@ export class PurchasingController {
   status(
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
-    @Body() body: { to?: string; comment?: string },
+    @Body() body: PoStatusDto,
   ) {
-    return this.purchasing.status(user, id, String(body?.to ?? ''), body?.comment);
+    return this.purchasing.status(user, id, String(body.to ?? ''), body.comment);
   }
 
   @Post(':id/receive')
   receive(
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
-    @Body() body: { warehouse?: string; lines?: { item: string; qty: number; serialNos?: string[] }[] },
+    @Body() body: PoReceiveDto,
   ) {
-    return this.purchasing.receive(user, id, String(body?.warehouse ?? ''), body?.lines ?? []);
+    return this.purchasing.receive(user, id, String(body.warehouse ?? ''), body.lines ?? []);
   }
 }
 
@@ -157,12 +175,12 @@ export class StockController {
   }
 
   @Post('moves')
-  create(@CurrentUser() user: SafeUser, @Body() body: Record<string, unknown>) {
+  create(@CurrentUser() user: SafeUser, @Body() body: StockMoveDto) {
     return this.stock.createMove(user, body as never);
   }
 
   @Post('receive')
-  receive(@CurrentUser() user: SafeUser, @Body() body: Record<string, unknown>) {
+  receive(@CurrentUser() user: SafeUser, @Body() body: StockReceiveDto) {
     return this.stock.receiveManual(user, body as never);
   }
 }
@@ -172,22 +190,22 @@ export class PmController {
   constructor(private readonly pm: PmService) {}
 
   @Post('generate')
-  generate(@CurrentUser() user: SafeUser, @Body() body: { upTo?: string }) {
+  generate(@CurrentUser() user: SafeUser, @Body() body: PmGenerateDto) {
     return this.pm.generate(user, body?.upTo);
   }
 
   @Patch('records/:id')
-  save(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+  save(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: PmSaveDto) {
     return this.pm.save(user, id, body as never);
   }
 
   @Post('templates')
-  createTemplate(@CurrentUser() user: SafeUser, @Body() body: Record<string, unknown>) {
+  createTemplate(@CurrentUser() user: SafeUser, @Body() body: PmTemplateDto) {
     return this.pm.saveTemplate(user, null, body as never);
   }
 
   @Patch('templates/:id')
-  updateTemplate(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: Record<string, unknown>) {
+  updateTemplate(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: PmTemplateDto) {
     return this.pm.saveTemplate(user, id, body as never);
   }
 }
@@ -204,10 +222,14 @@ export class DashboardController {
 
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(
+    private readonly reports: ReportsService,
+    private readonly access: AccessService,
+  ) {}
 
   @Get(':name')
   report(@CurrentUser() user: SafeUser, @Param('name') name: string) {
+    this.access.require(user, 'reports', 'view');
     switch (name) {
       case 'tickets':
         return this.reports.tickets(user);

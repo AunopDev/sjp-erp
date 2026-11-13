@@ -37,7 +37,7 @@ const TYPES: [string, string][] = [
         @if (!items().length) { <div class="state empty">ยังไม่มีสินค้า</div> }
         @else {
           <div class="tablecard"><div class="table-wrap"><table class="tbl">
-            <thead><tr><th>SKU</th><th>สินค้า</th>@for (wh of warehouses(); track wh.value) { <th>{{ wh.label }}</th> }<th>รวม</th><th>ขั้นต่ำ</th><th>สถานะ</th></tr></thead>
+            <thead><tr><th scope="col">SKU</th><th scope="col">สินค้า</th>@for (wh of warehouses(); track wh.value) { <th scope="col">{{ wh.label }}</th> }<th scope="col">รวม</th><th scope="col">ขั้นต่ำ</th><th scope="col">สถานะ</th></tr></thead>
             <tbody>@for (item of items(); track item.id) {
               <tr><td>{{ item['sku'] }}</td><td>{{ item['name'] }}</td>@for (wh of warehouses(); track wh.value) { <td>{{ balance(wh.value, item.id) }}</td> }<td><b>{{ total(item.id) }}</b></td><td>{{ item['minStock'] || 0 }}</td><td>@if (isLow(item)) { <span class="badge red">ต่ำกว่าขั้นต่ำ</span> } @else { <span class="badge green">ปกติ</span> }</td></tr>
             }</tbody>
@@ -48,39 +48,45 @@ const TYPES: [string, string][] = [
       @if (tab() === 'do') {
         @if (!auth.can('warehouse','create')) { <div class="state empty">ไม่มีสิทธิ์ทำรายการคลัง</div> }
         @else {
+          @if (!items().length || !warehouses().length) {
+            <div class="notice small">
+              ต้องมีสินค้าและคลังอย่างน้อย 1 รายการก่อนทำรายการ —
+              เพิ่มสินค้าที่เมนู “สินค้า/อุปกรณ์” และเพิ่มคลังจากแท็บ “รายชื่อคลัง”
+            </div>
+          }
           <div class="card">
             <div class="row" style="margin-bottom:10px">@for (type of types; track type[0]) { <button type="button" class="btn" [class.primary]="moveType() === type[0]" (click)="setType(type[0])">{{ type[1] }}</button> }</div>
             <div class="form-grid">
-              <div class="field"><label>สินค้า/อะไหล่ *</label><select [value]="itemId()" (change)="setItem($any($event.target).value)"><option value="" [selected]="!itemId()">– เลือก –</option>@for (item of items(); track item.id) { <option [value]="item.id" [selected]="item.id === itemId()">{{ item['name'] }}{{ item['trackSerial'] ? ' [Serial]' : '' }}</option> }</select></div>
-              @if (moveType() === 'adjust') { <div class="field"><label>ทิศทาง</label><select [value]="direction()" (change)="direction.set($any($event.target).value)"><option value="เพิ่ม" [selected]="direction() === 'เพิ่ม'">เพิ่ม</option><option value="ลด" [selected]="direction() === 'ลด'">ลด</option></select></div> }
-              @if (needFrom()) { <div class="field"><label>คลังต้นทาง *</label><select [value]="from()" (change)="from.set($any($event.target).value); selectedSerials.set([])"><option value="" [selected]="!from()">– เลือก –</option>@for (wh of warehouses(); track wh.value) { <option [value]="wh.value" [selected]="wh.value === from()">{{ wh.label }} (คงเหลือ {{ balance(wh.value, itemId()) }})</option> }</select></div> }
-              @if (needTo()) { <div class="field"><label>คลังปลายทาง *</label><select [value]="to()" (change)="to.set($any($event.target).value)"><option value="" [selected]="!to()">– เลือก –</option>@for (wh of warehouses(); track wh.value) { <option [value]="wh.value" [selected]="wh.value === to()">{{ wh.label }}</option> }</select></div> }
+              <div class="field"><label for="lf-warehouse-component-1">สินค้า/อะไหล่ *</label><select id="lf-warehouse-component-1" [value]="itemId()" (change)="setItem($any($event.target).value)"><option value="" [selected]="!itemId()">– เลือก –</option>@for (item of items(); track item.id) { <option [value]="item.id" [selected]="item.id === itemId()">{{ item['name'] }}{{ item['trackSerial'] ? ' [Serial]' : '' }}</option> }</select></div>
+              @if (moveType() === 'adjust') { <div class="field"><label for="lf-warehouse-component-2">ทิศทาง</label><select id="lf-warehouse-component-2" [value]="direction()" (change)="direction.set($any($event.target).value)"><option value="เพิ่ม" [selected]="direction() === 'เพิ่ม'">เพิ่ม</option><option value="ลด" [selected]="direction() === 'ลด'">ลด</option></select></div> }
+              @if (needFrom()) { <div class="field"><label for="lf-warehouse-component-3">คลังต้นทาง *</label><select id="lf-warehouse-component-3" [value]="from()" (change)="from.set($any($event.target).value); selectedSerials.set([])"><option value="" [selected]="!from()">– เลือก –</option>@for (wh of warehouses(); track wh.value) { <option [value]="wh.value" [selected]="wh.value === from()">{{ wh.label }} (คงเหลือ {{ balance(wh.value, itemId()) }})</option> }</select></div> }
+              @if (needTo()) { <div class="field"><label for="lf-warehouse-component-4">คลังปลายทาง *</label><select id="lf-warehouse-component-4" [value]="to()" (change)="to.set($any($event.target).value)"><option value="" [selected]="!to()">– เลือก –</option>@for (wh of warehouses(); track wh.value) { <option [value]="wh.value" [selected]="wh.value === to()">{{ wh.label }}</option> }</select></div> }
               @if (selectedItem()?.['trackSerial'] && moveType() === 'receive') {
-                <div class="field wide"><label>Serial Number ที่รับ (คั่นด้วยขึ้นบรรทัดใหม่หรือ ,) *</label><textarea rows="3" [value]="serialText()" (input)="serialText.set($any($event.target).value)"></textarea></div>
+                <div class="field wide"><label for="lf-warehouse-component-5">Serial Number ที่รับ (คั่นด้วยขึ้นบรรทัดใหม่หรือ ,) *</label><textarea id="lf-warehouse-component-5" rows="3" [value]="serialText()" (input)="serialText.set($any($event.target).value)"></textarea></div>
               } @else if (selectedItem()?.['trackSerial'] && moveType() !== 'adjust') {
                 <div class="field wide"><label>เลือก Serial *</label>
                   @if (!selectableSerials().length) { <span class="muted">ไม่มี Serial ที่เลือกได้</span> }
                   @else { <div class="row">@for (serial of selectableSerials(); track serial.id) { <label class="check"><input type="checkbox" [checked]="selectedSerials().includes(serial.id)" (change)="toggleSerial(serial.id, $event)" /> {{ serial['serialNo'] }} ({{ serial['status'] }})</label> }</div> }
                 </div>
               } @else {
-                <div class="field"><label>จำนวน *</label><input type="number" min="0" step="any" [value]="qty()" (input)="qty.set($any($event.target).value)" /></div>
+                <div class="field"><label for="lf-warehouse-component-6">จำนวน *</label><input id="lf-warehouse-component-6" type="number" min="0" step="any" [value]="qty()" (input)="qty.set($any($event.target).value)" /></div>
               }
               @if (moveType() === 'issue') {
-                <div class="field"><label>โครงการ</label><select [value]="project()" (change)="project.set($any($event.target).value)"><option value="" [selected]="!project()">–</option>@for (option of projects(); track option.value) { <option [value]="option.value" [selected]="option.value === project()">{{ option.label }}</option> }</select></div>
-                <div class="field"><label>ไซต์</label><select [value]="site()" (change)="site.set($any($event.target).value)"><option value="" [selected]="!site()">–</option>@for (option of sites(); track option.value) { <option [value]="option.value" [selected]="option.value === site()">{{ option.label }}</option> }</select></div>
-                <div class="field"><label>Ticket</label><select [value]="ticket()" (change)="ticket.set($any($event.target).value)"><option value="" [selected]="!ticket()">–</option>@for (option of tickets(); track option.value) { <option [value]="option.value" [selected]="option.value === ticket()">{{ option.label }}</option> }</select></div>
-                <div class="field"><label>ผู้รับ</label><input [value]="recipient()" (input)="recipient.set($any($event.target).value)" /></div>
+                <div class="field"><label for="lf-warehouse-component-7">โครงการ</label><select id="lf-warehouse-component-7" [value]="project()" (change)="project.set($any($event.target).value)"><option value="" [selected]="!project()">–</option>@for (option of projects(); track option.value) { <option [value]="option.value" [selected]="option.value === project()">{{ option.label }}</option> }</select></div>
+                <div class="field"><label for="lf-warehouse-component-8">ไซต์</label><select id="lf-warehouse-component-8" [value]="site()" (change)="site.set($any($event.target).value)"><option value="" [selected]="!site()">–</option>@for (option of sites(); track option.value) { <option [value]="option.value" [selected]="option.value === site()">{{ option.label }}</option> }</select></div>
+                <div class="field"><label for="lf-warehouse-component-9">Ticket</label><select id="lf-warehouse-component-9" [value]="ticket()" (change)="ticket.set($any($event.target).value)"><option value="" [selected]="!ticket()">–</option>@for (option of tickets(); track option.value) { <option [value]="option.value" [selected]="option.value === ticket()">{{ option.label }}</option> }</select></div>
+                <div class="field"><label for="lf-warehouse-component-10">ผู้รับ</label><input id="lf-warehouse-component-10" [value]="recipient()" (input)="recipient.set($any($event.target).value)" /></div>
               }
-              <div class="field wide"><label>หมายเหตุ{{ moveType() === 'adjust' ? ' / เหตุผล *' : '' }}</label><textarea rows="2" [value]="note()" (input)="note.set($any($event.target).value)"></textarea></div>
+              <div class="field wide"><label for="lf-warehouse-component-11">หมายเหตุ{{ moveType() === 'adjust' ? ' / เหตุผล *' : '' }}</label><textarea id="lf-warehouse-component-11" rows="2" [value]="note()" (input)="note.set($any($event.target).value)"></textarea></div>
             </div>
             @if (error()) { <div class="err" role="alert" style="margin-top:8px">{{ error() }}</div> }
-            <div class="row" style="margin-top:12px"><button type="button" class="btn primary" [disabled]="busy()" (click)="submit()">{{ busy() ? 'กำลังบันทึก…' : 'บันทึกรายการ' }}</button></div>
+            <div class="form-actions"><button type="button" class="btn primary" [disabled]="busy()" (click)="submit()">{{ busy() ? 'กำลังบันทึก…' : 'บันทึกรายการ' }}</button></div>
           </div>
         }
       }
 
       @if (tab() === 'moves') {
-        <app-data-table [columns]="moveColumns()" [rows]="moves()" [exportName]="'stock-moves'" [canExport]="auth.can('warehouse','export')" [emptyText]="'ยังไม่มีรายการเคลื่อนไหว'" [rowClass]="rowClass" />
+        <app-data-table [columns]="moveColumns()" [rows]="moves()" [exportName]="'stock-moves'" [canExport]="auth.can('warehouse','export')" [emptyText]="'ยังไม่มีรายการเคลื่อนไหว'" [error]="movesError()" [rowClass]="rowClass" (retry)="load()" />
       }
 
       @if (tab() === 'wh') {
@@ -105,6 +111,7 @@ export class WarehouseComponent implements OnInit {
   readonly warehouses = signal<Option[]>([]);
   readonly balances = signal<Record<string, Record<string, number>>>({});
   readonly moves = signal<RecordRow[]>([]);
+  readonly movesError = signal('');
   readonly serials = signal<RecordRow[]>([]);
   readonly projects = signal<Option[]>([]);
   readonly sites = signal<Option[]>([]);
@@ -151,6 +158,7 @@ export class WarehouseComponent implements OnInit {
   }
 
   load(): void {
+    this.movesError.set('');
     this.api.get<ListResponse<RecordRow>>('/records/items', { pageSize: 500 }).subscribe({ next: (result) => this.items.set(result.items), error: () => this.items.set([]) });
     this.api.get<ListResponse<RecordRow>>('/records/warehouses', { pageSize: 500 }).subscribe({
       next: (result) => {
@@ -160,7 +168,13 @@ export class WarehouseComponent implements OnInit {
       error: () => this.warehouses.set([]),
     });
     this.api.get<Record<string, Record<string, number>>>('/stock/balances').subscribe({ next: (balances) => this.balances.set(balances), error: () => this.balances.set({}) });
-    this.api.get<ListResponse<RecordRow>>('/stock/moves', { pageSize: 500, sort: '-date' }).subscribe({ next: (result) => this.moves.set(result.items), error: () => this.moves.set([]) });
+    this.api.get<ListResponse<RecordRow>>('/stock/moves', { pageSize: 500, sort: '-date' }).subscribe({
+      next: (result) => this.moves.set(result.items),
+      error: (error: unknown) => {
+        this.movesError.set(apiErrorMessage(error));
+        this.moves.set([]);
+      },
+    });
     this.api.get<ListResponse<RecordRow>>('/records/serials', { pageSize: 500 }).subscribe({ next: (result) => this.serials.set(result.items), error: () => this.serials.set([]) });
   }
 

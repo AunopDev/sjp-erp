@@ -19,24 +19,24 @@ import type { ListResponse, RecordRow } from '../core/models';
       <div class="page-head">
         <div><h1>งาน PM และรายงานบริการ</h1><div class="muted">รอบตรวจ รายการตรวจ และติดตามสิ่งผิดปกติ</div></div>
         <div class="page-actions">
-          @if (auth.can('pm','create') && tab() === 'jobs') { <button type="button" class="btn primary" [disabled]="busy()" (click)="generate()">{{ busy() ? 'กำลังสร้าง…' : 'สร้างงานตามรอบ (ล่วงหน้า 7 วัน)' }}</button> }
+          @if (auth.can('pm','create') && tab() === 'jobs') { <button type="button" class="btn primary" title="สร้างงาน PM ล่วงหน้า 7 วัน" [disabled]="busy()" (click)="generate()">{{ busy() ? 'กำลังสร้าง…' : 'สร้างงานตามรอบ' }}</button> }
           @if (auth.can('pm','create') && tab() === 'plans') { <button type="button" class="btn primary" (click)="planOpen.set({})">+ เพิ่มแผน PM</button> }
           @if (auth.can('pm','create') && tab() === 'tpl') { <button type="button" class="btn primary" (click)="openTemplate(null)">+ สร้างแม่แบบ</button> }
         </div>
       </div>
       <div class="notice small">รอบ PM และรายการตรวจในระบบเป็นตัวอย่างจำลอง รอผู้ใช้ยืนยัน — ปรับแผน/แม่แบบได้ในหน้านี้</div>
       <div class="tabs">
-        <button type="button" [class.active]="tab() === 'jobs'" (click)="tab.set('jobs')">งานตามรอบ ({{ jobs().length }})</button>
+        <button type="button" [class.active]="tab() === 'jobs'" (click)="tab.set('jobs')">งานตามรอบ <span class="tab-count">{{ jobs().length }}</span></button>
         <button type="button" [class.active]="tab() === 'plans'" (click)="tab.set('plans')">แผน PM</button>
         <button type="button" [class.active]="tab() === 'tpl'" (click)="tab.set('tpl')">แม่แบบรายการตรวจ</button>
       </div>
 
       @if (tab() === 'jobs') {
-        <app-data-table [columns]="jobColumns()" [rows]="jobs()" [tabs]="jobTabs" [exportName]="'pm-jobs'" [canExport]="auth.can('pm','export')" [emptyText]="'ยังไม่มีงาน PM — เพิ่มแผนแล้วกด “สร้างงานตามรอบ”'" [rowClass]="jobRowClass" (rowClick)="openJob($event)" />
+        <app-data-table [columns]="jobColumns()" [rows]="jobs()" [tabs]="jobTabs" [exportName]="'pm-jobs'" [canExport]="auth.can('pm','export')" [emptyText]="'ยังไม่มีงาน PM ที่คุณเข้าถึงได้ — ตรวจสอบทีม/ผู้รับผิดชอบในแผน แล้วกด “สร้างงานตามรอบ”'" [error]="loadError()" [rowClass]="jobRowClass" (rowClick)="openJob($event)" (retry)="load()" />
       }
 
       @if (tab() === 'plans') {
-        <app-data-table [columns]="planColumns()" [rows]="plans()" [exportName]="'pm-plans'" [canExport]="auth.can('pm','export')" [emptyText]="'ยังไม่มีแผน PM'" [rowClass]="rowClass" (rowClick)="editPlan($event)" />
+        <app-data-table [columns]="planColumns()" [rows]="plans()" [exportName]="'pm-plans'" [canExport]="auth.can('pm','export')" [emptyText]="'ยังไม่มีแผน PM'" [error]="loadError()" [rowClass]="rowClass" (rowClick)="editPlan($event)" (retry)="load()" />
       }
 
       @if (tab() === 'tpl') {
@@ -60,12 +60,12 @@ import type { ListResponse, RecordRow } from '../core/models';
         <div class="menu-panel" role="dialog" aria-label="แม่แบบรายการตรวจ">
           <div class="menu-head"><b>{{ templateForm.id ? 'แก้ไขแม่แบบรายการตรวจ' : 'สร้างแม่แบบรายการตรวจ' }}</b><span class="grow"></span><button type="button" class="icon-btn" (click)="templateOpen.set(false)" aria-label="ปิด">×</button></div>
           <div class="form-grid">
-            <div class="field"><label>ชื่อแม่แบบ *</label><input [value]="templateForm.name" (input)="templateForm.name = $any($event.target).value" /></div>
-            <div class="field"><label>ประเภทอุปกรณ์</label><input [value]="templateForm.category" (input)="templateForm.category = $any($event.target).value" /></div>
-            <div class="field wide"><label>รายการตรวจ (บรรทัดละ 1 รายการ)</label><textarea rows="8" [value]="templateForm.items" (input)="templateForm.items = $any($event.target).value"></textarea></div>
+            <div class="field"><label for="lf-pm-component-1">ชื่อแม่แบบ *</label><input id="lf-pm-component-1" [value]="templateForm.name" (input)="templateForm.name = $any($event.target).value" /></div>
+            <div class="field"><label for="lf-pm-component-2">ประเภทอุปกรณ์</label><input id="lf-pm-component-2" [value]="templateForm.category" (input)="templateForm.category = $any($event.target).value" /></div>
+            <div class="field wide"><label for="lf-pm-component-3">รายการตรวจ (บรรทัดละ 1 รายการ)</label><textarea id="lf-pm-component-3" rows="8" [value]="templateForm.items" (input)="templateForm.items = $any($event.target).value"></textarea></div>
           </div>
           @if (templateError()) { <div class="err">{{ templateError() }}</div> }
-          <div class="row" style="margin-top:12px"><button type="button" class="btn" (click)="templateOpen.set(false)">ยกเลิก</button><button type="button" class="btn primary" [disabled]="templateBusy()" (click)="saveTemplate()">บันทึก</button></div>
+          <div class="form-actions"><button type="button" class="btn" (click)="templateOpen.set(false)">ยกเลิก</button><button type="button" class="btn primary" [disabled]="templateBusy()" (click)="saveTemplate()">บันทึก</button></div>
         </div>
       </div>
     }
@@ -83,6 +83,7 @@ export class PmComponent implements OnInit {
   readonly jobs = signal<RecordRow[]>([]);
   readonly plans = signal<RecordRow[]>([]);
   readonly templates = signal<RecordRow[]>([]);
+  readonly loadError = signal('');
   readonly busy = signal(false);
   readonly planOpen = signal<Record<string, unknown> | null>(null);
   readonly templateOpen = signal(false);
@@ -106,8 +107,21 @@ export class PmComponent implements OnInit {
   }
 
   load(): void {
-    this.api.get<ListResponse<RecordRow>>('/records/pmRecords', { pageSize: 500, sort: '-dueDate' }).subscribe({ next: (result) => this.jobs.set(result.items), error: () => this.jobs.set([]) });
-    this.api.get<ListResponse<RecordRow>>('/records/pmPlans', { pageSize: 500, sort: '-_createdAt' }).subscribe({ next: (result) => this.plans.set(result.items), error: () => this.plans.set([]) });
+    this.loadError.set('');
+    this.api.get<ListResponse<RecordRow>>('/records/pmRecords', { pageSize: 500, sort: '-dueDate' }).subscribe({
+      next: (result) => this.jobs.set(result.items),
+      error: (error: unknown) => {
+        this.loadError.set(apiErrorMessage(error));
+        this.jobs.set([]);
+      },
+    });
+    this.api.get<ListResponse<RecordRow>>('/records/pmPlans', { pageSize: 500, sort: '-_createdAt' }).subscribe({
+      next: (result) => this.plans.set(result.items),
+      error: (error: unknown) => {
+        this.loadError.set(apiErrorMessage(error));
+        this.plans.set([]);
+      },
+    });
     this.api.get<ListResponse<RecordRow>>('/records/pmTemplates', { pageSize: 500 }).subscribe({ next: (result) => this.templates.set(result.items), error: () => this.templates.set([]) });
   }
 

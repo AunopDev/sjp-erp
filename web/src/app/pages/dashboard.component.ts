@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
@@ -6,127 +6,233 @@ import { fmtDateTime, fmtDuration } from '../core/util';
 import { IconComponent } from '../shared/icon.component';
 import { StateComponent } from '../shared/state.component';
 import { ToastService } from '../shared/toast.service';
+import type { DashboardData } from '../core/dashboard.models';
 import type { RecordRow } from '../core/models';
-
-interface DashboardData {
-  tickets: { open: number; urgent: number; mine: number };
-  projects: { active: number; closed: number; byStep: Record<string, number> };
-  pm: { overdue: number; week: number };
-  stock: { low: number; names: string[] };
-  warranty: number;
-  pendingApprovals: number;
-  finance: {
-    invoices: { open: number; outstanding: number; overdue: number; overdueAmount: number; dueSoon: number };
-    receipts: { count: number; month: number };
-    expenses: { month: number; pending: number; pendingAmount: number };
-  } | null;
-  oldest: (RecordRow & { ageH: number })[];
-  myTickets: RecordRow[];
-  myPm: RecordRow[];
-  myProjects: RecordRow[];
-  byStatus: { key: string; label: string; count: number }[];
-  byTeam: { label: string; count: number }[];
-  byAssignee: { id: string; label: string; count: number }[];
-  activity: { id: string; at: string; userName: string; action: string; summary: string }[];
-}
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
   imports: [RouterLink, IconComponent, StateComponent],
   template: `
-    <div class="page">
-      <div class="page-head dashboard-head">
-        <div class="dash-copy">
-          <span class="eyebrow">ศูนย์ปฏิบัติการ · {{ todayText }}</span>
-          <h1>{{ greeting }}, {{ firstName }}</h1>
-          <div class="muted">ภาพรวมงานที่ต้องดูแลวันนี้ และทางลัดไปยังงานด่วน</div>
-          <div class="dash-actions">
-            <a class="btn primary" routerLink="/tickets/new"><app-icon name="plus" [size]="16" /> แจ้งซ่อม</a>
-            <a class="btn" routerLink="/projects"><app-icon name="folder" [size]="16" /> โครงการ</a>
-            <a class="btn" routerLink="/my"><app-icon name="check" [size]="16" /> งานของฉัน</a>
-          </div>
+    <div class="page dash">
+      <header class="dash-top">
+        <div>
+          <div class="dash-kicker">ศูนย์ปฏิบัติการ · {{ todayText }}</div>
+          <h1>ภาพรวมปฏิบัติการ</h1>
+          <p class="dash-sub">{{ greeting }}, {{ firstName }} — งานที่ต้องตัดสินใจและติดตามวันนี้</p>
         </div>
-        <div class="dash-mini">
-          <a routerLink="/my" class="dash-mini-item"><span class="dm-n">{{ data()?.tickets?.mine ?? 0 }}</span><span class="dm-l">งานของฉัน</span><span class="dm-s">เคสที่มอบหมาย</span></a>
-          <a routerLink="/approvals" class="dash-mini-item"><span class="dm-n">{{ data()?.pendingApprovals ?? 0 }}</span><span class="dm-l">รออนุมัติ</span><span class="dm-s">คำขอค้าง</span></a>
-          <a routerLink="/pm" class="dash-mini-item"><span class="dm-n">{{ data()?.pm?.overdue ?? 0 }}</span><span class="dm-l">PM เกินกำหนด</span><span class="dm-s">ต้องติดตาม</span></a>
+        <div class="page-actions">
+          <a class="btn" routerLink="/workspace" [queryParams]="{ edit: 1 }"><app-icon name="grid" [size]="14" /> จัดหน้าจอ</a>
+          <a class="btn" routerLink="/projects"><app-icon name="folder" [size]="14" /> โครงการ</a>
+          <a class="btn" routerLink="/calendar"><app-icon name="calendar" [size]="14" /> ปฏิทินงาน</a>
+          <a class="btn ghost" routerLink="/my"><app-icon name="check" [size]="14" /> งานของฉัน</a>
         </div>
-      </div>
+      </header>
 
       @if (loading()) {
         <app-state kind="loading" message="กำลังโหลดข้อมูล…" />
       } @else if (data()) {
-        <div class="tiles">
-          <a class="tile" routerLink="/tickets"><span class="tile-ic"><app-icon name="ticket" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ data()!.tickets.open }}</span><span class="tile-l">เคสค้าง</span><span class="tile-s">{{ data()!.tickets.urgent ? data()!.tickets.urgent + ' เคสสูง/เร่งด่วน' : 'ไม่มีเคสเร่งด่วน' }}</span></span></a>
-          <a class="tile" routerLink="/projects"><span class="tile-ic"><app-icon name="folder" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ data()!.projects.active }}</span><span class="tile-l">โครงการที่ดำเนินการ</span><span class="tile-s">ปิดแล้ว {{ data()!.projects.closed }}</span></span></a>
-          <a class="tile" routerLink="/warehouse"><span class="tile-ic"><app-icon name="box" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ data()!.stock.low }}</span><span class="tile-l">สินค้าต่ำกว่าขั้นต่ำ</span><span class="tile-s">{{ data()!.stock.names.join(', ') || 'สต็อกปกติ' }}</span></span></a>
-          <a class="tile" routerLink="/entities/serials"><span class="tile-ic"><app-icon name="tag" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ data()!.warranty }}</span><span class="tile-l">ใกล้หมดประกัน (30 วัน)</span><span class="tile-s">อุปกรณ์ที่ติดตั้งแล้ว</span></span></a>
+        <section class="dash-kpis" aria-label="ตัวชี้วัดสำคัญ">
+          @if (auth.can('tickets', 'view') || auth.can('pm', 'view') || auth.can('projects', 'view')) {
+            <a class="dash-kpi" routerLink="/my">
+              <span class="dash-kpi-label"><app-icon name="check" [size]="13" /> งานของฉัน</span>
+              <span class="dash-kpi-value">{{ data()!.tickets.mine }}</span>
+              <span class="dash-kpi-meta">เคสที่มอบหมายให้คุณ</span>
+            </a>
+          }
+          @if (auth.can('tickets', 'view') || auth.can('purchase', 'view') || auth.can('accounting', 'view')) {
+            <a class="dash-kpi" [class.alert]="data()!.pendingApprovals > 0" routerLink="/approvals">
+              <span class="dash-kpi-label"><app-icon name="bell" [size]="13" /> รออนุมัติ</span>
+              <span class="dash-kpi-value">{{ data()!.pendingApprovals }}</span>
+              <span class="dash-kpi-meta">คำขอที่ยังไม่ตัดสินใจ</span>
+            </a>
+          }
+          @if (auth.can('tickets', 'view')) {
+            <a class="dash-kpi" [class.alert]="data()!.tickets.urgent > 0" routerLink="/tickets">
+              <span class="dash-kpi-label"><app-icon name="ticket" [size]="13" /> เคสค้าง</span>
+              <span class="dash-kpi-value">{{ data()!.tickets.open }}</span>
+              <span class="dash-kpi-meta">{{ data()!.tickets.urgent ? data()!.tickets.urgent + ' เคสสูง/เร่งด่วน' : 'ไม่มีเคสเร่งด่วน' }}</span>
+            </a>
+          }
+          @if (auth.can('pm', 'view')) {
+            <a class="dash-kpi" [class.alert]="data()!.pm.overdue > 0" routerLink="/pm">
+              <span class="dash-kpi-label"><app-icon name="wrench" [size]="13" /> PM เกินกำหนด</span>
+              <span class="dash-kpi-value">{{ data()!.pm.overdue }}</span>
+              <span class="dash-kpi-meta">แผนงานในสัปดาห์นี้ {{ data()!.pm.week }}</span>
+            </a>
+          }
+          @if (auth.can('warehouse', 'view')) {
+            <a class="dash-kpi" [class.alert]="data()!.stock.low > 0" routerLink="/warehouse">
+              <span class="dash-kpi-label"><app-icon name="box" [size]="13" /> สินค้าต่ำ</span>
+              <span class="dash-kpi-value">{{ data()!.stock.low }}</span>
+              <span class="dash-kpi-meta">{{ stockMeta() }}</span>
+            </a>
+          }
+          @if (auth.can('assets', 'view')) {
+            <a class="dash-kpi" routerLink="/entities/serials">
+              <span class="dash-kpi-label"><app-icon name="tag" [size]="13" /> ใกล้หมดประกัน</span>
+              <span class="dash-kpi-value">{{ data()!.warranty }}</span>
+              <span class="dash-kpi-meta">อุปกรณ์ภายใน 30 วัน</span>
+            </a>
+          }
+        </section>
+
+        <div class="dash-layout" [class.single]="!auth.can('tickets', 'view')">
+          @if (auth.can('tickets', 'view')) {
+            <section class="panel">
+              <div class="panel-head">
+                <h2>คิวงานที่ต้องจัดการ</h2>
+                <span class="badge gray">{{ data()!.oldest.length }}</span>
+                <a class="link" routerLink="/tickets">ดูทั้งหมด</a>
+              </div>
+            <div class="panel-body">
+              @if (!data()!.oldest.length) {
+                <div class="panel-empty">ไม่มีเคสค้าง — เยี่ยมมาก</div>
+              } @else {
+                @for (ticket of data()!.oldest; track ticket.id) {
+                  <a class="queue-row" [routerLink]="['/tickets', ticket.id]">
+                    <span class="queue-code">{{ ticket.code }}</span>
+                    <span class="queue-main">
+                      <b>{{ ticket['title'] }}</b>
+                      <span>{{ ticket._labels?.['site'] }} · {{ ticket._labels?.['assignee'] || 'ยังไม่มอบหมาย' }}</span>
+                    </span>
+                    <span class="queue-age">{{ fmtDuration(ticket.ageH) }}</span>
+                  </a>
+                }
+              }
+            </div>
+          </section>
+          }
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>ความเคลื่อนไหวล่าสุด</h2>
+              @if (auth.can('settings', 'view')) {
+                <a class="link" routerLink="/settings">ทั้งหมด</a>
+              }
+            </div>
+            <div class="panel-body">
+              @if (!data()!.activity.length) {
+                <div class="panel-empty">ยังไม่มีความเคลื่อนไหว</div>
+              } @else {
+                @for (entry of data()!.activity; track entry.id) {
+                  <div class="activity-row">
+                    <span class="act-avatar">{{ entry.userName.charAt(0) }}</span>
+                    <span class="act-main">{{ entry.summary }}<span>{{ entry.userName }}</span></span>
+                    <span class="act-time">{{ fmtDateTime(entry.at) }}</span>
+                  </div>
+                }
+              }
+            </div>
+          </section>
         </div>
 
-        @if (data()!.finance; as fin) {
-          <div class="finance-head">
-            <h2>ภาพรวมการเงิน</h2>
-            <span class="grow"></span>
-            <a routerLink="/entities/invoices">ดูใบแจ้งหนี้ทั้งหมด</a>
-          </div>
-          <div class="tiles finance-tiles">
-            <a class="tile" routerLink="/entities/invoices"><span class="tile-ic"><app-icon name="doc" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ money(fin.invoices.outstanding) }}</span><span class="tile-l">ยอดค้างชำระ</span><span class="tile-s">{{ fin.invoices.open }} ใบ · ครบใน 7 วัน {{ fin.invoices.dueSoon }} ใบ</span></span></a>
-            <a class="tile" routerLink="/entities/invoices"><span class="tile-ic warn"><app-icon name="chart" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ fin.invoices.overdue }}</span><span class="tile-l">ใบแจ้งหนี้เกินกำหนด</span><span class="tile-s">รวม {{ money(fin.invoices.overdueAmount) }}</span></span></a>
-            <a class="tile" routerLink="/entities/receipts"><span class="tile-ic ok"><app-icon name="receipt" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ money(fin.receipts.month) }}</span><span class="tile-l">รับชำระเดือนนี้</span><span class="tile-s">{{ fin.receipts.count }} รายการ</span></span></a>
-            <a class="tile" routerLink="/entities/expenses"><span class="tile-ic"><app-icon name="chart" [size]="22" /></span><span class="tile-body"><span class="tile-n">{{ money(fin.expenses.month) }}</span><span class="tile-l">ค่าใช้จ่ายเดือนนี้</span><span class="tile-s">รออนุมัติ {{ fin.expenses.pending }} รายการ</span></span></a>
-          </div>
+        @if (auth.can('accounting', 'view') && data()!.finance; as fin) {
+          <section class="panel finance-panel">
+            <div class="panel-head">
+              <h2>ภาพรวมการเงิน</h2>
+              <a class="link" routerLink="/entities/invoices">ดูใบแจ้งหนี้ทั้งหมด</a>
+            </div>
+            <div class="finance-strip">
+              <a class="fin-item" routerLink="/entities/invoices">
+                <div class="fin-label">ยอดค้างชำระ</div>
+                <div class="fin-value">{{ money(fin.invoices.outstanding) }}</div>
+                <div class="fin-meta">{{ fin.invoices.open }} ใบ · ครบใน 7 วัน {{ fin.invoices.dueSoon }} ใบ</div>
+              </a>
+              <a class="fin-item" routerLink="/entities/invoices">
+                <div class="fin-label">ใบแจ้งหนี้เกินกำหนด</div>
+                <div class="fin-value" [class.alert]="fin.invoices.overdue > 0">{{ fin.invoices.overdue }}</div>
+                <div class="fin-meta">รวม {{ money(fin.invoices.overdueAmount) }}</div>
+              </a>
+              <a class="fin-item" routerLink="/entities/receipts">
+                <div class="fin-label">รับชำระเดือนนี้</div>
+                <div class="fin-value">{{ money(fin.receipts.month) }}</div>
+                <div class="fin-meta">{{ fin.receipts.count }} รายการ</div>
+              </a>
+              <a class="fin-item" routerLink="/entities/expenses">
+                <div class="fin-label">ค่าใช้จ่ายเดือนนี้</div>
+                <div class="fin-value">{{ money(fin.expenses.month) }}</div>
+                <div class="fin-meta">รออนุมัติ {{ fin.expenses.pending }} รายการ</div>
+              </a>
+            </div>
+          </section>
         }
 
-        <div class="grid c2">
-          <div class="card">
-            <div class="row"><h2 style="margin:0">เคสที่ค้างนานที่สุด</h2><span class="grow"></span><a routerLink="/tickets">ดูทั้งหมด</a></div>
-            @if (!data()!.oldest.length) {
-              <div class="state empty">ไม่มีเคสค้าง — เยี่ยมมาก</div>
-            } @else {
-              @for (ticket of data()!.oldest; track ticket.id) {
-                <a class="list-row" [routerLink]="['/tickets', ticket.id]">
-                  <span class="mono muted">{{ ticket.code }}</span>
-                  <span class="lr-main"><b>{{ ticket['title'] }}</b><span class="sub">{{ ticket._labels?.['site'] }} · {{ ticket._labels?.['assignee'] || 'ยังไม่มอบหมาย' }}</span></span>
-                  <span class="lr-age">{{ fmtDuration(ticket.ageH) }}</span>
-                </a>
+        @if (auth.can('tickets', 'view') || auth.can('projects', 'view')) {
+        <div class="dash-grid">
+          @if (auth.can('tickets', 'view')) {
+          <section class="panel">
+            <div class="panel-head"><h2>เคสตามสถานะ</h2></div>
+            <div class="panel-body">
+              @if (!data()!.byStatus.length) {
+                <div class="panel-empty">ไม่มีเคสค้าง</div>
+              } @else {
+                @for (row of data()!.byStatus; track row.key) {
+                  <div class="bar-row">
+                    <span class="bar-label">{{ row.label }}</span>
+                    <span class="bar-track"><span class="bar-fill" [style.width.%]="barWidth(row.count, maxStatus())"></span></span>
+                    <span class="bar-count">{{ row.count }}</span>
+                  </div>
+                }
               }
-            }
-          </div>
-          <div class="card">
-            <div class="row"><h2 style="margin:0">ความเคลื่อนไหวล่าสุด</h2><span class="grow"></span>@if (auth.can('settings','view')) { <a routerLink="/settings">ประวัติทั้งหมด</a> }</div>
-            @if (!data()!.activity.length) {
-              <div class="state empty">ยังไม่มีความเคลื่อนไหว</div>
-            } @else {
-              @for (entry of data()!.activity; track entry.id) {
-                <div class="list-row static">
-                  <span class="avatar sm">{{ entry.userName.charAt(0) }}</span>
-                  <span class="lr-main"><span>{{ entry.summary }}</span><span class="sub">{{ entry.userName }}</span></span>
-                  <span class="lr-age muted">{{ fmtDateTime(entry.at) }}</span>
-                </div>
-              }
-            }
-          </div>
-        </div>
+            </div>
+          </section>
 
-        <div class="grid c2">
-          <div class="card"><h2>สัดส่วนเคสค้างตามสถานะ</h2>
-            @if (!data()!.byStatus.length) { <div class="state empty">ไม่มีเคสค้าง</div> }
-            @else { @for (row of data()!.byStatus; track row.key) { <div class="hbar"><span>{{ row.label }}</span><div class="bar"><div [style.width.%]="barWidth(row.count, maxStatus())"></div></div><b>{{ row.count }}</b></div> } }
-          </div>
-          <div class="card"><h2>เคสค้างตามทีม</h2>
-            @if (!data()!.byTeam.length) { <div class="state empty">ไม่มีเคสค้าง</div> }
-            @else { @for (row of data()!.byTeam; track row.label) { <div class="hbar"><span>{{ row.label }}</span><div class="bar"><div [style.width.%]="barWidth(row.count, maxTeam())"></div></div><b>{{ row.count }}</b></div> } }
-          </div>
-          <div class="card"><h2>เคสค้างตามผู้รับผิดชอบ</h2>
-            @if (!data()!.byAssignee.length) { <div class="state empty">ไม่มีเคสค้าง</div> }
-            @else { @for (row of data()!.byAssignee; track row.id) { <div class="hbar"><span>{{ row.label }}</span><div class="bar"><div [style.width.%]="barWidth(row.count, maxAssignee())"></div></div><b>{{ row.count }}</b></div> } }
-          </div>
-          <div class="card"><h2>โครงการตามขั้นตอนปัจจุบัน</h2>
-            @if (!projectSteps().length) { <div class="state empty">ไม่มีโครงการที่ดำเนินการ</div> }
-            @else { @for (row of projectSteps(); track row[0]) { <div class="hbar"><span>{{ row[0] }}</span><div class="bar"><div [style.width.%]="barWidth(row[1], maxStep())"></div></div><b>{{ row[1] }}</b></div> } }
-          </div>
+          <section class="panel">
+            <div class="panel-head"><h2>เคสตามทีม</h2></div>
+            <div class="panel-body">
+              @if (!data()!.byTeam.length) {
+                <div class="panel-empty">ไม่มีเคสค้าง</div>
+              } @else {
+                @for (row of data()!.byTeam; track row.label) {
+                  <div class="bar-row">
+                    <span class="bar-label">{{ row.label }}</span>
+                    <span class="bar-track"><span class="bar-fill" [style.width.%]="barWidth(row.count, maxTeam())"></span></span>
+                    <span class="bar-count">{{ row.count }}</span>
+                  </div>
+                }
+              }
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head"><h2>เคสตามผู้รับผิดชอบ</h2></div>
+            <div class="panel-body">
+              @if (!data()!.byAssignee.length) {
+                <div class="panel-empty">ไม่มีเคสค้าง</div>
+              } @else {
+                @for (row of data()!.byAssignee; track row.id) {
+                  <div class="bar-row">
+                    <span class="bar-label">{{ row.label }}</span>
+                    <span class="bar-track"><span class="bar-fill" [style.width.%]="barWidth(row.count, maxAssignee())"></span></span>
+                    <span class="bar-count">{{ row.count }}</span>
+                  </div>
+                }
+              }
+            </div>
+          </section>
+          }
+
+          @if (auth.can('projects', 'view')) {
+          <section class="panel">
+            <div class="panel-head"><h2>โครงการตามขั้นตอน</h2></div>
+            <div class="panel-body">
+              @if (!projectSteps().length) {
+                <div class="panel-empty">ไม่มีโครงการที่ดำเนินการ</div>
+              } @else {
+                @for (row of projectSteps(); track row[0]) {
+                  <div class="bar-row">
+                    <span class="bar-label">{{ row[0] }}</span>
+                    <span class="bar-track"><span class="bar-fill" [style.width.%]="barWidth(row[1], maxStep())"></span></span>
+                    <span class="bar-count">{{ row[1] }}</span>
+                  </div>
+                }
+              }
+            </div>
+          </section>
+          }
         </div>
+        }
       }
     </div>
   `,
@@ -141,7 +247,13 @@ export class DashboardComponent implements OnInit {
   readonly data = signal<DashboardData | null>(null);
   readonly fmtDuration = fmtDuration;
   readonly fmtDateTime = fmtDateTime;
-  readonly Math = Math;
+  readonly stockMeta = computed(() => {
+    const stock = this.data()?.stock;
+    if (!stock) return '';
+    if (!stock.names.length) return 'สต็อกอยู่ในระดับปกติ';
+    const joined = stock.names.join(', ');
+    return joined.length > 42 ? `สินค้าต่ำ ${stock.low} รายการ` : joined;
+  });
 
   money(value: unknown): string {
     const n = Number(value);

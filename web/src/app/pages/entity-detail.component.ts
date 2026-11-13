@@ -66,10 +66,12 @@ const SPECIAL_ROUTES: Record<string, string> = {
                 <h3>สถานะ: <span class="badge {{ statusColor(row['status']) }}">{{ statusLabel(row['status']) }}</span></h3>
                 @if (statusOptions().length) {
                   <div class="form-grid" style="margin-top:10px">
-                    <div class="field"><label>เปลี่ยนเป็น</label><select [value]="statusTo()" (change)="setStatusTo($any($event.target).value)">@for (status of statusOptions(); track status.key) { <option [value]="status.key" [selected]="status.key === statusTo()">{{ status.label }}{{ statusNeedsApproval(status) ? ' · ต้องอนุมัติ' : '' }}</option> }</select></div>
-                    <div class="field wide"><label>หมายเหตุ</label><input [value]="statusComment()" (input)="statusComment.set($any($event.target).value)" /></div>
+                    <div class="field"><label for="lf-entity-detail-component-1">เปลี่ยนเป็น</label><select id="lf-entity-detail-component-1" [value]="statusTo()" (change)="setStatusTo($any($event.target).value)">@for (status of statusOptions(); track status.key) { <option [value]="status.key" [selected]="status.key === statusTo()">{{ status.label }}{{ statusNeedsApproval(status) ? ' · ต้องอนุมัติ' : '' }}</option> }</select></div>
+                    <div class="field wide"><label for="lf-entity-detail-component-2">หมายเหตุ</label><input id="lf-entity-detail-component-2" [value]="statusComment()" (input)="statusComment.set($any($event.target).value)" /></div>
                   </div>
-                  <button type="button" class="btn primary" [disabled]="statusBusy()" (click)="changeStatus()">{{ statusNeedsApproval(selectedStatus()) ? 'ส่งคำขออนุมัติ' : 'เปลี่ยนสถานะ' }}</button>
+                  <div class="form-actions">
+                    <button type="button" class="btn primary" [disabled]="statusBusy()" (click)="changeStatus()">{{ statusNeedsApproval(selectedStatus()) ? 'ส่งคำขออนุมัติ' : 'เปลี่ยนสถานะ' }}</button>
+                  </div>
                 } @else { <div class="muted small">ไม่มีสถานะถัดไปที่เปลี่ยนได้</div> }
               </div>
             }
@@ -89,8 +91,8 @@ const SPECIAL_ROUTES: Record<string, string> = {
                     } @else if (field.type === 'rows') {
                       @if (asRows(row[field.key]).length) {
                         <div class="table-wrap"><table class="mini">
-                          <thead><tr>@for (col of field.cols; track col.key) { <th>{{ col.label }}</th> }</tr></thead>
-                          <tbody>@for (line of asRows(row[field.key]); track $index) { <tr>@for (col of field.cols; track col.key) { <td>{{ rowCell(row, field, line, $index, col.key) }}</td> }</tr> }</tbody>
+                          <thead><tr>@for (col of field.cols; track col.key) { <th scope="col">{{ col.label }}</th> }</tr></thead>
+                          <tbody>@for (line of asRows(row[field.key]); track $index; let rowIndex = $index) { <tr>@for (col of field.cols; track col.key) { <td>{{ rowCell(row, field, line, rowIndex, col.key) }}</td> }</tr> }</tbody>
                         </table></div>
                       } @else { <span class="muted">–</span> }
                     } @else {

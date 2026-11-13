@@ -1,0 +1,220 @@
+SJP ERP — Security Remediation Status
+วันที่แก้: 11 พ.ย. 2026
+อ้างอิง: docs/security-review-checklist-2026-11-11.txt
+
+สถานะรวม: แก้ครบกลุ่ม A, B, C และเพิ่ม regression tests แล้ว
+ผลตรวจ: server build ผ่าน, server unit 13/13, server e2e 17/17,
+web build ผ่าน, web tests 10/10, npm audit 0 vulnerabilities
+
+
+====================================================================
+กลุ่ม A — ต้องแก้ก่อน
+====================================================================
+
+[x] A1. ล็อกสถานะการจองรถ
+    - guardCreate/guardUpdate ใน records.service.ts
+    - สร้าง/แก้เป็น "อนุมัติแล้ว" ผ่าน generic API ไม่ได้
+    - อนุญาตเฉพาะ ยกเลิก/เสร็จสิ้น และต้องผ่าน /decision สำหรับอนุมัติ
+    - แก้รถ/เวลา หลังอนุมัติจะ reset กลับเป็น "รออนุมัติ"
+    - รายการที่ปิด/ยกเลิกแล้วแก้รถ/เวลาไม่ได้
+
+[x] A2. ล็อก role และรหัสผ่านของผู้ใช้
+    - users.service.ts ตรวจ actor ก่อนเปลี่ยน roleId/password
+    - non-admin แตะบัญชี admin ไม่ได้
+    - non-admin กำหนด role ที่มีสิทธิ์สูงกว่าตัวเองไม่ได้
+    - users.create กำหนด role admin ได้เฉพาะ admin
+    - เพิ่ม DTO validation (CreateUserDto/UpdateUserDto)
+
+[x] A3. Field-level guard ใน generic update
+    - tickets: เปลี่ยน assignee/team ต้องมี tickets.assign
+    - projects: เปลี่ยน manager/team ต้องมี projects.assign
+    - purchaseOrders: ล็อก vendor/project/orderDate/dueDate/lines หลัง draft
+    - vehicleBookings: ล็อกสถานะ/รถ/เวลาตาม A1
+    - serials: ห้ามแก้ status/warehouse ตรง ๆ
+
+[x] A4. ปิดการแก้เอกสารที่จบแล้ว
+    - tickets closed, projects closed, purchaseOrders closed/cancelled,
+      invoices paid/cancelled, expenses paid/cancelled
+    - เอกสารที่ปิดแล้วแก้ผ่าน generic PATCH ไม่ได้
+
+
+====================================================================
+กลุ่ม B — ความปลอดภัยระดับกลาง
+====================================================================
+
+[x] B1. บล็อก module key ที่ชนกับ resource ระบบ
+    - RESERVED_ENTITY_KEYS ใน metadata.service.ts
+    - บล็อก users, roles, settings, reports, files, backup, ฯลฯ
+    - บล็อกชื่อ prototype เช่น constructor/toString
+    - บล็อก field key ชื่อสงวนใน normalizeFields/renameField
+
+[x] B2. จำกัดการแก้ role/permission
+    - saveRole เป็น admin-only
+    - validate resource/action ใน perms
+    - กัน role แก้สิทธิ์ตัวเองให้สูงขึ้นผ่าน users.edit
+
+[x] B3. จำกัดการอัปโหลดไฟล์
+    - ต้องมีสิทธิ์ create/edit ของ entity ใดentity หนึ่ง
+    - allowlist MIME/extension
+    - ตรวจ magic bytes ให้ตรงกับนามสกุล
+    - จำกัด 500 ไฟล์ / 500 MB ต่อผู้ใช้
+    - เขียนไฟล์ async และ mode 0600
+    - Content-Type มาจาก allowlist ไม่ใช่ client
+
+[x] B4. Backup export/restore
+    - export/restore/legacy import เป็น admin-only
+    - export และ restore ต้องยืนยันรหัสผ่านของผู้ใช้ปัจจุบัน
+    - ไฟล์สำรองเข้ารหัส AES-256-GCM
+      (คีย์จาก BACKUP_ENCRYPTION_KEY หรือ JWT_SECRET)
+    - redact SMTP/LINE secret และ webhook secret ก่อนเข้ารหัส
+    - restore ไม่ลบ audit เดิมแล้ว
+    - validate schema ของ users/roles/records/settings/approvals
+    - จำกัดขนาดไฟล์แนบใน backup (250 MB)
+
+[x] B5. ปิด SSRF ของ SMTP
+    - ใช้ network-guard (private IP/DNS)
+    - เพิ่ม SMTP_ALLOW_PRIVATE สำหรับ SMTP ภายใน
+    - ไม่ส่ง error ภายในแบบละเอียดกลับ client
+
+[x] B6. ปิด SSRF ของ Webhook
+    - ตรวจ IPv4-mapped IPv6 ทั้งแบบ dotted และ hex
+    - pin IP ที่ resolve แล้วในการเชื่อมต่อ (กัน DNS rebinding)
+    - ปิด redirect และ timeout 10 วินาที
+    - ตั้ง/ทดสอบ/retry webhook เป็น admin-only
+
+[x] B7. Session/token
+    - เพิ่ม pv claim ใน JWT = fingerprint ของ password hash
+    - เปลี่ยนรหัสผ่านแล้ว token เก่าใช้ไม่ได้ทันที
+    - login/setup ตั้ง HttpOnly session cookie + CSRF cookie
+      (ไม่เก็บ token ใหม่ใน localStorage แล้ว)
+    - mutation ที่ใช้ cookie ต้องมี X-CSRF-Token ตรงกับ cookie
+    - logout เพิ่ม session version ฝั่ง server (revoke ทุก token ของผู้ใช้)
+    - ตั้ง SameSite ผ่าน COOKIE_SAME_SITE และ Secure ผ่าน COOKIE_SECURE
+    - เพิ่ม Content-Security-Policy สำหรับ API
+    - frontend production index มี CSP meta และ nginx ตั้ง CSP header
+    - ปิด X-Powered-By
+
+[x] B8. Setup race
+    - serialize setup ด้วย queue ภายใน process
+    - เพิ่ม DB lock ใน settings (setup_lock) สำหรับหลาย process
+    - lock เก่าเกิน 5 นาทีถือว่า stale และถูกแทนที่
+
+
+====================================================================
+กลุ่ม C — Hardening
+====================================================================
+
+[x] C1. ตรวจสิทธิ์ข้อมูล
+    - /meta/options/users ต้องมี users.view หรือสิทธิ์ assign ที่เกี่ยวข้อง
+    - labelOf รับ user และคืน "(ไม่มีสิทธิ์)" เมื่ออยู่นอก scope
+    - เพิ่ม FieldDef.sensitive และตัดออกจาก API/PDF
+    - /reports/:name ต้องมี reports.view
+    - หมายเหตุ: ฟิลด์ hidden เดิมยังส่งออกเพราะ UI ใช้ (stock moves/PM)
+      ใช้ sensitive สำหรับข้อมูลที่ต้องปิดจริงในอนาคต
+
+[x] C2. DTO validation
+    - ValidationPipe เปิด whitelist + forbidNonWhitelisted
+    - เพิ่ม DTO สำหรับ auth, users, backup, meta, notify, webhooks, operations
+    - กำหนด JSON/urlencoded body limit 10 MB
+    - controller ที่ยังรับ Record<string, unknown> คือ create record ทั่วไป
+      ซึ่งผ่าน service validation/sanitize อยู่แล้ว
+
+[x] C3. Registry/error handling
+    - findEntity ใช้ hasOwn ป้องกัน prototype chain
+    - getEntity คืน 404 แทน 500
+    - metadata.apply กรอง __proto__/constructor/prototype
+
+[x] C4. ลดความเสี่ยง DoS / pagination
+    - จำกัด PDF concurrency 2 งาน และ throttle 10/นาที
+    - upload throttle 30/นาที + quota ต่อผู้ใช้
+    - search throttle 60/นาที + scan cap 5,000 แถว/entity
+    - records list ใช้ SQL pagination/filter/sort/search ทุก scope
+      (own/team/dept/project/site แปลงเป็น SQL predicate)
+    - search รองรับ label ของ ref ผ่าน subquery
+    - backup export จำกัดขนาดไฟล์แนบ
+
+[x] C5. Deployment/transport
+    - CSP, HSTS (production), nosniff, frame deny, referrer policy
+    - frontend production index มี CSP meta และ theme-init เป็น external script
+    - deploy/nginx/sjp-erp.conf มี CSP/HSTS/API proxy ตัวอย่าง
+    - ปิด X-Powered-By
+    - เตือนถ้า production ไม่ได้ตั้ง CORS_ORIGIN
+    - chmod 0700 uploads และ 0600 database (best effort)
+
+[x] C6. Input ที่ยังไม่เข้ม
+    - users.update ตรวจ projectIds/siteIds/active type
+    - legacyImport ตรวจ id/code/key และตัด key แปลก
+    - workflow ตรวจ approverRole/approverUser ว่ามีจริง
+    - project step docs ตรวจ key
+
+
+====================================================================
+กลุ่ม D — ทดสอบและยืนยัน
+====================================================================
+
+[x] D1. ติดตั้ง dependencies และตรวจพื้นฐาน
+    - server: npm ci, build, test, test:e2e, lint
+    - web: npm ci, build, test
+    - npm audit --omit=dev: 0 vulnerabilities ทั้ง server และ web
+
+[x] D2. Regression tests
+    - server/src/common/network-guard.spec.ts
+      ทดสอบ private IPv4, IPv4-mapped IPv6, hostname, URL credentials
+    - server/src/files/file-signature.spec.ts
+      ทดสอบ magic-byte ของ png/pdf/docx/csv และไฟล์อันตราย
+    - server/test/security.e2e-spec.ts
+      ทดสอบ vehicle self-approval, module key collision,
+      users.edit escalation, admin password reset, backup admin-only,
+      SQL pagination/filter, scoped SQL, cookie auth + CSRF,
+      backup encryption/restore re-auth, upload type guard,
+      webhook IPv4-mapped SSRF, ticket assign guard, structured audit,
+      closed-project edit guard, logout session revoke
+    - ผล: e2e 17/17 ผ่าน
+
+[x] D3. เอกสาร/Finding register
+    - ไฟล์นี้เป็น status register
+    - อัปเดตสถานะล่าสุดของ C4/B7/B8 แล้ว
+
+
+====================================================================
+สิ่งที่ยังเหลือ / ข้อควรรู้
+====================================================================
+
+1. Search performance เมื่อข้อมูลโตมาก
+   - list/search ใช้ SQL แล้ว แต่ ref-label search ใช้ correlated subquery
+   - ถ้าข้อมูลหลักแสนแถว ควรเพิ่ม index หรือ full-text search
+
+2. HttpOnly cookie ใช้ COOKIE_SAME_SITE (ค่าเริ่มต้น lax)
+   - ถ้า frontend/API อยู่ต่างโดเมนจริง ให้ตั้ง COOKIE_SAME_SITE=none
+     และ COOKIE_SECURE=true (ต้องใช้ HTTPS)
+
+3. Backup restore ยืนยันรหัสผ่านแล้ว
+   - ถ้าต้องการระดับสูงสุด ควรเพิ่ม 2FA ก่อน restore
+
+4. Backup encryption key
+   - ใช้ BACKUP_ENCRYPTION_KEY หรือ JWT_SECRET
+   - ถ้าเปลี่ยนคีย์ ไฟล์สำรองเก่าจะถอดรหัสไม่ได้
+   - ควรเก็บคีย์นอกเครื่องและสำรองไว้แยก
+
+5. Setup lock ใช้ตาราง settings (setup_lock)
+   - ทำงานข้าม process บน SQLite เดียวกัน
+   - ถ้าย้ายไป multi-node/DB อื่น ควรใช้ advisory lock ของ DB นั้น
+
+6. หลัง deploy ครั้งนี้ ผู้ใช้ทุกคนจะถูกบังคับ login ใหม่
+   - เพราะ token เก่าไม่มี pv/sv claim
+
+7. SMTP ภายในองค์กร
+   - ตั้ง SMTP_ALLOW_PRIVATE=true ใน .env ถ้าใช้ mail relay ภายใน
+   - Webhook ภายในใช้ WEBHOOK_ALLOW_PRIVATE=true (ระวัง SSRF)
+
+8. ฟิลด์ hidden เดิมยังถูกส่งออก API
+   - ใช้ field.sensitive=true สำหรับข้อมูลที่ต้องปิดจริง
+
+9. Upload scanning
+   - ตรวจ magic bytes ตามชนิดไฟล์แล้ว
+   - ยังไม่ได้ต่อ antivirus/ClamAV และยังไม่ scan ไฟล์เก่าที่มีอยู่
+   - PDF ยังใช้ Chrome --no-sandbox (ควรมี sandbox/container แยก)
+
+10. Structured audit
+    - log user.update/user.password_reset/role.update/login_failed/logout แล้ว
+    - ยังไม่มี IP address และยังไม่ log failed authorization ทุกจุด

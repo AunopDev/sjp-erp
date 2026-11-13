@@ -38,7 +38,7 @@ type StepData = Record<string, unknown>;
         @if (p['closed']) { <div class="notice bad">โครงการปิดแล้ว — {{ p['closeReason'] }}</div> }
 
         <div class="tabs">
-          <button type="button" [class.active]="tab() === 'steps'" (click)="tab.set('steps')">ขั้นตอน ({{ steps().length }})</button>
+          <button type="button" [class.active]="tab() === 'steps'" (click)="tab.set('steps')">ขั้นตอน <span class="tab-count">{{ steps().length }}</span></button>
           <button type="button" [class.active]="tab() === 'info'" (click)="tab.set('info')">ข้อมูลโครงการ</button>
           <button type="button" [class.active]="tab() === 'boq'" (click)="tab.set('boq')">BOQ / อุปกรณ์</button>
           <button type="button" [class.active]="tab() === 'audit'" (click)="tab.set('audit')">ประวัติ</button>
@@ -81,7 +81,7 @@ type StepData = Record<string, unknown>;
             <h3>BOQ เทียบการสั่งซื้อ/รับ/เบิก/ติดตั้ง</h3>
             @if (!boqRows().length) { <div class="muted">ยังไม่มีรายการ BOQ</div> }
             @else {
-              <div class="table-wrap"><table class="mini"><thead><tr><th>สินค้า</th><th>ต้องใช้</th><th>สั่งซื้อ</th><th>รับเข้า</th><th>เบิกไปหน้างาน</th><th>ติดตั้งแล้ว</th></tr></thead>
+              <div class="table-wrap"><table class="mini"><thead><tr><th scope="col">สินค้า</th><th scope="col">ต้องใช้</th><th scope="col">สั่งซื้อ</th><th scope="col">รับเข้า</th><th scope="col">เบิกไปหน้างาน</th><th scope="col">ติดตั้งแล้ว</th></tr></thead>
                 <tbody>@for (row of boqRows(); track $index) { <tr><td>{{ row.itemLabel }}</td><td>{{ row.qty }}</td><td>{{ row.ordered }}</td><td>{{ row.received }}</td><td>{{ row.issued }}</td><td>{{ row.installed }}</td></tr> }</tbody>
               </table></div>
             }

@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
 import { users } from '../db/schema.js';
 import type { SafeUser } from '../auth/user.types.js';
-import { getEntity, type EntityDef } from '../meta/entities.js';
+import { findEntity, type EntityDef } from '../meta/entities.js';
 import { forbidden } from './exceptions.js';
 
 export interface RecordLike {
@@ -32,13 +32,31 @@ export class AccessService {
     if (!this.can(user, resource, action)) forbidden();
   }
 
+  /** File uploads are allowed for users who can create/edit any business record. */
+  canUploadFiles(user: SafeUser): boolean {
+    if (!user.active) return false;
+    if (user.isAdmin) return true;
+    return ['master', 'assets', 'projects', 'tickets', 'purchase', 'warehouse', 'accounting', 'pm', 'vehicles', 'vehicleBookings', 'settings'].some(
+      (resource) => !!user.perms?.[resource]?.['create'] || !!user.perms?.[resource]?.['edit'],
+    );
+  }
+
+  requireUploadFiles(user: SafeUser): void {
+    if (!this.canUploadFiles(user)) forbidden('ไม่มีสิทธิ์อัปโหลดไฟล์');
+  }
+
+  /** User pickers are available to user managers and roles that assign work. */
+  canPickUsers(user: SafeUser): boolean {
+    return this.can(user, 'users', 'view') || ['tickets', 'projects', 'pm', 'vehicleBookings'].some((resource) => this.can(user, resource, 'edit'));
+  }
+
   canEntity(user: SafeUser, entityKey: string, action: string): boolean {
-    const def = getEntity(entityKey);
+    const def = findEntity(entityKey);
     return !!def && this.can(user, def.resource, action);
   }
 
   requireEntity(user: SafeUser, entityKey: string, action: string): EntityDef {
-    const def = getEntity(entityKey);
+    const def = findEntity(entityKey);
     if (!def) forbidden('ไม่พบชนิดข้อมูลนี้');
     this.require(user, def.resource, action);
     return def;

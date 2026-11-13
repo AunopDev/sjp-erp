@@ -5,7 +5,6 @@ import { AuthService } from '../core/auth.service';
 import { fmtDate, fmtDuration, fmtMoney } from '../core/util';
 import type { ColumnDef } from '../shared/data-table.component';
 import { DataTableComponent } from '../shared/data-table.component';
-import { ToastService } from '../shared/toast.service';
 import type { RecordRow } from '../core/models';
 
 type ReportName = 'tickets' | 'projects' | 'serials' | 'stock' | 'boq';
@@ -18,9 +17,11 @@ type ReportName = 'tickets' | 'projects' | 'serials' | 'stock' | 'boq';
     <div class="page">
       <div class="page-head"><div><h1>รายงานและส่งออกข้อมูล</h1><div class="muted">ทุกแถวเปิดย้อนไปยังเอกสารต้นทางได้ · ส่งออกเป็น CSV (เปิดใน Excel ได้)</div></div></div>
       <div class="tabs">
-        @for (tab of tabs; track tab[0]) { <button type="button" [class.active]="active() === tab[0]" (click)="select(tab[0])">{{ tab[1] }}</button> }
+        @for (tab of tabs(); track tab[0]) { <button type="button" [class.active]="active() === tab[0]" (click)="select(tab[0])">{{ tab[1] }}</button> }
       </div>
-      @if (loading()) { <div class="state"><div class="spinner"></div>กำลังโหลดรายงาน…</div> }
+      @if (error()) { <div class="state error">{{ error() }}</div> }
+      @else if (loading()) { <div class="state"><div class="spinner"></div>กำลังโหลดรายงาน…</div> }
+      @else if (!tabs().length) { <div class="state empty">ไม่มีรายงานที่คุณมีสิทธิ์ดู</div> }
       @else {
         <app-data-table [columns]="columns()" [rows]="rows()" [exportName]="active()" [canExport]="auth.can('reports','export')" (rowClick)="open($event)" />
       }
@@ -31,33 +32,44 @@ type ReportName = 'tickets' | 'projects' | 'serials' | 'stock' | 'boq';
 export class ReportsComponent implements OnInit {
   readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
-  private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
 
   readonly active = signal<ReportName>('tickets');
   readonly rows = signal<RecordRow[]>([]);
   readonly loading = signal(false);
-  readonly tabs: [ReportName, string][] = [
-    ['tickets', 'Ticket ทั้งหมด'],
-    ['projects', 'โครงการ'],
-    ['boq', 'BOQ เทียบจริง'],
-    ['serials', 'Serial/รับประกัน'],
-    ['stock', 'ยอดสต็อก'],
+  readonly error = signal('');
+  private readonly tabDefs: { name: ReportName; label: string; resource: string }[] = [
+    { name: 'tickets', label: 'Ticket ทั้งหมด', resource: 'tickets' },
+    { name: 'projects', label: 'โครงการ', resource: 'projects' },
+    { name: 'boq', label: 'BOQ เทียบจริง', resource: 'projects' },
+    { name: 'serials', label: 'Serial/รับประกัน', resource: 'assets' },
+    { name: 'stock', label: 'ยอดสต็อก', resource: 'warehouse' },
   ];
+  readonly tabs = computed<[ReportName, string][]>(() =>
+    this.tabDefs.filter((tab) => this.auth.can(tab.resource, 'view')).map((tab) => [tab.name, tab.label]),
+  );
   readonly fmtDate = fmtDate;
   readonly fmtDuration = fmtDuration;
   readonly fmtMoney = fmtMoney;
 
   ngOnInit(): void {
+    const allowed = this.tabs();
+    if (allowed.length && !allowed.some(([name]) => name === this.active())) this.active.set(allowed[0][0]);
     this.load();
   }
 
   select(name: ReportName): void {
+    if (!this.tabs().some(([key]) => key === name)) return;
     this.active.set(name);
     this.load();
   }
 
   load(): void {
+    this.error.set('');
+    if (!this.tabs().length) {
+      this.rows.set([]);
+      return;
+    }
     this.loading.set(true);
     this.api.get<RecordRow[]>(`/reports/${this.active()}`).subscribe({
       next: (rows) => {
@@ -66,7 +78,7 @@ export class ReportsComponent implements OnInit {
       },
       error: (error: unknown) => {
         this.loading.set(false);
-        this.toast.error(apiErrorMessage(error));
+        this.error.set(apiErrorMessage(error));
       },
     });
   }

@@ -1,24 +1,41 @@
-﻿import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+﻿import {
+  ChangeDetectionStrategy,
+  Component,
+  OnDestroy,
+  OnInit,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
-import { iconForPath, IconComponent } from '../shared/icon.component';
-import { readSidebarCollapsed, readTheme, writeSidebarCollapsed, writeTheme } from '../core/storage';
+import { ToastService } from '../shared/toast.service';
+import { IconComponent } from '../shared/icon.component';
+import {
+  readDensity,
+  readNavClosedGroups,
+  readNavFavorites,
+  readSidebarCollapsed,
+  readTheme,
+  writeDensity,
+  writeNavClosedGroups,
+  writeNavFavorites,
+  writeSidebarCollapsed,
+  writeTheme,
+} from '../core/storage';
+import type { Density } from '../core/storage';
+import type { SideNavGroup, SideNavItem } from './side-nav.component';
+import { SideNavComponent } from './side-nav.component';
+import type { QuickCreateAction } from './quick-create.component';
+import { QuickCreateComponent } from './quick-create.component';
 
-interface NavItem {
-  path: string;
-  label: string;
-  short?: string;
-  icon: string;
-  resource?: string;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
+type NavItem = SideNavItem;
+type NavGroup = SideNavGroup;
 
 interface NotificationItem {
   id: string;
@@ -61,40 +78,50 @@ const ENTITY_ICONS: Record<string, string> = {
   vendors: 'truck',
   items: 'chip',
   serials: 'tag',
+  vehicles: 'truck',
+  vehicleBookings: 'calendar',
 };
 
 const GROUPS: NavGroup[] = [
   {
     label: 'ภาพรวม',
+    icon: 'home',
     items: [
       { path: '/', label: 'หน้าแรก', short: 'หน้าแรก', icon: 'home' },
+      { path: '/workspace', label: 'โต๊ะทำงาน', short: 'โต๊ะทำงาน', icon: 'grid' },
       { path: '/my', label: 'งานของฉัน', icon: 'check' },
+      { path: '/calendar', label: 'ปฏิทินงาน', short: 'ปฏิทิน', icon: 'calendar' },
       { path: '/approvals', label: 'คำขออนุมัติ', icon: 'bell' },
     ],
   },
   {
-    label: 'งานขาย/โครงการ',
+    label: 'งานบริการและโครงการ',
+    icon: 'wrench',
     items: [
-      { path: '/projects', label: 'โครงการ', short: 'โครงการ', icon: 'folder', resource: 'projects' },
-      { path: '/calendar', label: 'ปฏิทินงาน', short: 'ปฏิทิน', icon: 'calendar' },
-    ],
-  },
-  {
-    label: 'บริการ',
-    items: [
-      { path: '/tickets', label: 'แจ้งซ่อม / Service Ticket', short: 'แจ้งซ่อม', icon: 'ticket', resource: 'tickets' },
+      { path: '/tickets', label: 'แจ้งซ่อม', short: 'แจ้งซ่อม', icon: 'ticket', resource: 'tickets' },
       { path: '/pm', label: 'งาน PM', icon: 'wrench', resource: 'pm' },
+      { path: '/projects', label: 'โครงการ', short: 'โครงการ', icon: 'folder', resource: 'projects' },
     ],
   },
   {
-    label: 'คลัง/จัดซื้อ',
+    label: 'ยานพาหนะ',
+    icon: 'truck',
+    items: [
+      { path: '/vehicles', label: 'จองรถ', short: 'จองรถ', icon: 'calendar', resource: 'vehicleBookings' },
+      { path: '/entities/vehicles', label: 'รถบริษัท', icon: 'truck', resource: 'vehicles' },
+    ],
+  },
+  {
+    label: 'จัดซื้อและคลัง',
+    icon: 'box',
     items: [
       { path: '/purchase-orders', label: 'ใบสั่งซื้อ', icon: 'receipt', resource: 'purchase' },
       { path: '/warehouse', label: 'คลังสินค้า', short: 'คลัง', icon: 'box', resource: 'warehouse' },
     ],
   },
   {
-    label: 'บัญชี/การเงิน',
+    label: 'บัญชีและการเงิน',
+    icon: 'receipt',
     items: [
       { path: '/entities/invoices', label: 'ใบแจ้งหนี้/วางบิล', icon: 'doc', resource: 'accounting' },
       { path: '/entities/receipts', label: 'ใบเสร็จ/รับชำระ', icon: 'receipt', resource: 'accounting' },
@@ -103,6 +130,7 @@ const GROUPS: NavGroup[] = [
   },
   {
     label: 'ข้อมูลหลัก',
+    icon: 'building',
     items: [
       { path: '/entities/customers', label: 'ลูกค้า', icon: 'building', resource: 'master' },
       { path: '/entities/vendors', label: 'ผู้ขาย', icon: 'truck', resource: 'master' },
@@ -114,54 +142,66 @@ const GROUPS: NavGroup[] = [
   },
   {
     label: 'ระบบ',
+    icon: 'gear',
     items: [
       { path: '/reports', label: 'รายงานและส่งออก', icon: 'chart', resource: 'reports' },
-      { path: '/settings', label: 'ตั้งค่าผู้ใช้/สิทธิ์', icon: 'gear', resource: 'settings' },
+      { path: '/settings', label: 'ตั้งค่า', short: 'ตั้งค่า', icon: 'gear', resource: 'settings' },
     ],
   },
 ];
 
+const QUICK_ACTIONS: QuickCreateAction[] = [
+  { label: 'แจ้งซ่อม', path: '/tickets/new', icon: 'ticket', resource: 'tickets' },
+  { label: 'ใบสั่งซื้อ', path: '/purchase-orders?new=1', icon: 'receipt', resource: 'purchase' },
+  { label: 'ใบแจ้งหนี้', path: '/entities/invoices?new=1', icon: 'doc', resource: 'accounting' },
+  { label: 'รับชำระ', path: '/entities/receipts?new=1', icon: 'receipt', resource: 'accounting' },
+  { label: 'ค่าใช้จ่าย', path: '/entities/expenses?new=1', icon: 'chart', resource: 'accounting' },
+  { label: 'โครงการ', path: '/projects?new=1', icon: 'folder', resource: 'projects' },
+  { label: 'จองรถ', path: '/vehicles?new=1', icon: 'calendar', resource: 'vehicleBookings' },
+];
+
+const DEFAULT_FAVORITES: string[] = [];
+const DEFAULT_CLOSED_GROUPS = [
+  ...GROUPS.map((group) => group.label).filter((label) => label !== 'ภาพรวม'),
+  'โมดูลของฉัน',
+];
+const MAX_FAVORITES = 6;
+
+const normalizeUrl = (url: string): string => url.split('?')[0].split('#')[0];
+
+const matchesPath = (url: string, path: string): boolean => {
+  const clean = normalizeUrl(url);
+  if (path === '/') return clean === '/';
+  return clean === path || clean.startsWith(`${path}/`);
+};
+
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, IconComponent],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, IconComponent, SideNavComponent, QuickCreateComponent],
   template: `
     <div class="app">
       <a class="skip-link" href="#main-content">ข้ามไปยังเนื้อหาหลัก</a>
-      <aside class="rail" [class.collapsed]="sidebarCollapsed()" aria-label="เมนูหลัก">
-        <a class="rail-logo" routerLink="/" aria-label="หน้าแรก">
-          <b>SJP</b>
-          <span class="rail-brand-text"><strong>ERP</strong><small>ระบบงานบริษัท</small></span>
-        </a>
-        <nav class="rail-nav">
-          @for (group of visibleGroups(); track group.label) {
-            <div class="rail-group">
-              <h4>{{ group.label }}</h4>
-              @for (item of group.items; track item.path) {
-                <a class="rail-link" [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }" [attr.title]="item.label">
-                  <span class="rail-ic"><app-icon [name]="item.icon" [size]="19" /></span>
-                  <span class="rail-label">{{ item.label }}</span>
-                  @if (item.path === '/approvals' && pendingApprovals()) { <span class="rail-badge">{{ pendingApprovals() }}</span> }
-                </a>
-              }
-            </div>
-          }
-        </nav>
-        <div class="rail-foot">
-          <button class="rail-foot-btn" type="button" (click)="toggleTheme()">
-            <span class="rail-ic"><app-icon [name]="theme() === 'dark' ? 'sun' : 'moon'" [size]="19" /></span>
-            <span>{{ theme() === 'dark' ? 'โหมดสว่าง' : 'โหมดมืด' }}</span>
-          </button>
-        </div>
-      </aside>
+      <app-side-nav
+        class="sb-desktop"
+        [mode]="sidebarCollapsed() ? 'rail' : 'expanded'"
+        [groups]="visibleGroups()"
+        [favorites]="favorites()"
+        [closedGroups]="closedGroups()"
+        [currentUrl]="currentUrl()"
+        [pendingApprovals]="pendingApprovals()"
+        [theme]="theme()"
+        (toggleFavorite)="toggleFavorite($event)"
+        (reorderFavorites)="reorderFavorites($event)"
+        (toggleGroup)="toggleGroup($event)"
+        (toggleCollapse)="toggleSidebar()"
+        (toggleTheme)="toggleTheme()"
+      />
 
       <div class="main2">
         <header class="top">
-          <button class="icon-btn sidebar-toggle" type="button" (click)="toggleSidebar()" [attr.title]="sidebarCollapsed() ? 'ขยายเมนู' : 'ย่อเมนู'" aria-label="ย่อ/ขยายเมนู">
-            <app-icon name="columns" [size]="20" />
-          </button>
-          <button class="menu-chip" type="button" (click)="menuOpen.set(true)">
-            <app-icon name="menu" [size]="18" /> เมนู
+          <button class="menu-chip" type="button" (click)="openMenu()" aria-label="เปิดเมนู">
+            <app-icon name="menu" [size]="18" /> <span class="menu-chip-label">เมนู</span>
           </button>
           <div class="crumbs">
             <span class="muted">{{ pageInfo().group }}</span>
@@ -169,16 +209,20 @@ const GROUPS: NavGroup[] = [
             <b>{{ pageInfo().label }}</b>
           </div>
           <span class="grow"></span>
-          <button class="search-box" type="button" (click)="openPalette()" aria-label="ค้นหา">
-            <app-icon name="search" [size]="18" />
-            <span>ค้นหาเมนู / หน้า…</span>
-            <kbd>Ctrl K</kbd>
+          <button class="search-box" type="button" (click)="openPalette()" aria-keyshortcuts="Control+K">
+            <app-icon name="search" [size]="18" aria-hidden="true" />
+            <span>ค้นหาทั่วระบบ…</span>
+            <kbd aria-hidden="true">Ctrl K</kbd>
           </button>
-          @if (auth.can('tickets', 'create')) {
-            <a class="btn primary create-btn" routerLink="/tickets/new"><app-icon name="plus" [size]="18" /> <span class="create-label">สร้าง</span></a>
+          @if (quickActions().length || quickPrimary()) {
+            <app-quick-create
+              [currentUrl]="currentUrl()"
+              [actions]="quickActions()"
+              [primaryOverride]="quickPrimary()"
+            />
           }
           <div class="pop-wrap">
-            <button class="icon-btn approval-btn" type="button" (click)="toggleNotifications()" [attr.aria-expanded]="notificationsOpen()" aria-label="การแจ้งเตือน">
+            <button class="icon-btn approval-btn" type="button" (click)="toggleNotifications()" [attr.aria-expanded]="notificationsOpen()" [attr.aria-label]="notifications().length ? 'การแจ้งเตือน ' + notifications().length + ' รายการ' : 'การแจ้งเตือน'">
               <app-icon name="bell" [size]="20" />
               @if (notifications().length) { <span class="bell-badge">{{ notifications().length > 99 ? '99+' : notifications().length }}</span> }
             </button>
@@ -202,12 +246,13 @@ const GROUPS: NavGroup[] = [
           <div class="pop-wrap">
             <button class="user-btn" type="button" (click)="userOpen.set(!userOpen())" [attr.aria-expanded]="userOpen()">
               <span class="avatar">{{ initials() }}</span>
-              <span class="user-name">{{ auth.user()?.name }}</span>
+              <span class="user-name" [title]="auth.user()?.name">{{ auth.user()?.name }}</span>
             </button>
             @if (userOpen()) {
               <div class="popover right">
                 <div class="pop-title">{{ auth.user()?.name }}<div class="muted small" style="font-weight:400">{{ auth.user()?.roleName }} · {{ auth.user()?.username }}</div></div>
                 <button class="pop-row" type="button" (click)="toggleTheme()"><app-icon [name]="theme() === 'dark' ? 'sun' : 'moon'" /> {{ theme() === 'dark' ? 'ใช้โหมดสว่าง' : 'ใช้โหมดมืด' }}</button>
+                <button class="pop-row" type="button" (click)="toggleDensity()"><app-icon name="columns" /> ความหนาแน่น: {{ density() === 'compact' ? 'กระชับ' : 'สบาย' }}</button>
                 <button class="pop-row" type="button" (click)="auth.logout()"><app-icon name="logout" /> ออกจากระบบ</button>
               </div>
             }
@@ -217,35 +262,33 @@ const GROUPS: NavGroup[] = [
         <main id="main-content" class="content" tabindex="-1"><router-outlet /></main>
 
         <nav class="bottombar" aria-label="ทางลัดด้านล่าง">
-          @for (item of pinned(); track item.path) {
-            <a class="bb-item" [routerLink]="item.path" [routerLinkActive]="'active'" [routerLinkActiveOptions]="{ exact: item.path === '/' }">
+          @for (item of mobilePinned(); track item.path) {
+            <a class="bb-item" [routerLink]="item.path" routerLinkActive="'active'" [routerLinkActiveOptions]="{ exact: item.path === '/' }">
               <span class="bb-ic"><app-icon [name]="item.icon" [size]="24" /></span><span>{{ item.short ?? item.label }}</span>
             </a>
           }
-          <button class="bb-item" type="button" (click)="menuOpen.set(true)"><span class="bb-ic"><app-icon name="grid" [size]="24" /></span><span>เมนู</span></button>
+          <button class="bb-item" type="button" (click)="openMenu()"><span class="bb-ic"><app-icon name="grid" [size]="24" /></span><span>เมนู</span></button>
         </nav>
       </div>
     </div>
 
     @if (menuOpen()) {
-      <div class="overlay" (mousedown)="onOverlay($event)">
-        <div class="menu-panel" role="dialog" aria-label="เมนูทั้งหมด">
-          <div class="menu-head"><b>เมนูทั้งหมด</b><span class="muted small">{{ auth.user()?.roleName }}</span><span class="grow"></span><button class="icon-btn" type="button" (click)="menuOpen.set(false)" aria-label="ปิด"><app-icon name="close" /></button></div>
-          <div class="menu-grid">
-            @for (group of visibleGroups(); track group.label) {
-              <div class="menu-group">
-                <h4>{{ group.label }}</h4>
-                @for (item of group.items; track item.path) {
-                  <div class="menu-item">
-                    <a [routerLink]="item.path" [routerLinkActive]="'active'" [routerLinkActiveOptions]="{ exact: item.path === '/' }" (click)="menuOpen.set(false)">
-                      <app-icon [name]="item.icon" /><span>{{ item.label }}</span>
-                    </a>
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        </div>
+      <div class="overlay sb-drawer-overlay" (mousedown)="onOverlay($event)">
+        <app-side-nav
+          class="sb-drawer-host"
+          mode="drawer"
+          [groups]="visibleGroups()"
+          [favorites]="favorites()"
+          [closedGroups]="closedGroups()"
+          [currentUrl]="currentUrl()"
+          [pendingApprovals]="pendingApprovals()"
+          [theme]="theme()"
+          (toggleFavorite)="toggleFavorite($event)"
+          (reorderFavorites)="reorderFavorites($event)"
+          (toggleGroup)="toggleGroup($event)"
+          (toggleTheme)="toggleTheme()"
+          (closeDrawer)="closeMenu()"
+        />
       </div>
     }
 
@@ -281,11 +324,12 @@ const GROUPS: NavGroup[] = [
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ShellComponent implements OnInit {
+export class ShellComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
   private readonly meta = inject(MetaService);
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
+  private readonly toast = inject(ToastService);
 
   readonly menuOpen = signal(false);
   readonly userOpen = signal(false);
@@ -295,29 +339,78 @@ export class ShellComponent implements OnInit {
   readonly recordResults = signal<SearchResult[]>([]);
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   readonly theme = signal(readTheme());
+  readonly density = signal<Density>(readDensity());
   readonly sidebarCollapsed = signal(readSidebarCollapsed());
   readonly currentUrl = signal(this.router.url);
   readonly pendingApprovals = signal(0);
   readonly notifications = signal<NotificationItem[]>([]);
   readonly notificationsOpen = signal(false);
 
+  constructor() {
+    effect(() => {
+      const url = this.currentUrl();
+      const groups = this.visibleGroups();
+      untracked(() => this.syncActiveGroup(url, groups));
+    });
+  }
+
+  private readonly storedFavorites = signal<string[] | null>(readNavFavorites());
+  readonly closedGroups = signal<string[]>(readNavClosedGroups() ?? DEFAULT_CLOSED_GROUPS);
+
   readonly visibleGroups = computed<NavGroup[]>(() => {
     const groups: NavGroup[] = GROUPS.map((group) => ({
       ...group,
       items: group.items.filter((item) => !item.resource || this.auth.can(item.resource, 'view')),
     })).filter((group) => group.items.length);
-    const custom: NavItem[] = (this.meta.meta()?.customModules ?? [])
-      .filter((entity) => this.auth.can(entity.key, 'view'))
-      .map((entity) => ({ path: `/entities/${entity.key}`, label: entity.label, icon: 'puzzle', resource: entity.key }));
-    return custom.length ? [...groups, { label: 'โมดูลของฉัน', items: custom }] : groups;
+    const custom = (this.meta.meta()?.customModules ?? [])
+      .filter((entity) => this.auth.can(entity.key, 'view'));
+    const ungrouped: NavItem[] = [];
+    for (const entity of custom) {
+      const item: NavItem = {
+        path: `/entities/${entity.key}`,
+        label: entity.navLabel || entity.label,
+        icon: entity.icon || 'puzzle',
+        resource: entity.key,
+      };
+      const target = entity.group ? groups.find((group) => group.label === entity.group) : undefined;
+      if (target) target.items = [...target.items, item];
+      else ungrouped.push(item);
+    }
+    return ungrouped.length ? [...groups, { label: 'โมดูลของฉัน', icon: 'puzzle', items: ungrouped }] : groups;
   });
 
-  readonly pinned = computed<NavItem[]>(() =>
-    this.visibleGroups()
-      .flatMap((group) => group.items)
-      .filter((item) => ['/', '/tickets', '/projects', '/warehouse'].includes(item.path))
-      .slice(0, 4),
+  private readonly allNavItems = computed<NavItem[]>(() => this.visibleGroups().flatMap((group) => group.items));
+  private readonly visiblePaths = computed(() => new Set(this.allNavItems().map((item) => item.path)));
+
+  readonly favorites = computed<string[]>(() => {
+    const visible = this.visiblePaths();
+    const base = this.storedFavorites() ?? DEFAULT_FAVORITES;
+    return base.filter((path) => visible.has(path)).slice(0, MAX_FAVORITES);
+  });
+
+  readonly mobilePinned = computed<NavItem[]>(() => {
+    const items = this.allNavItems();
+    const preferred = this.favorites().length ? this.favorites() : DEFAULT_FAVORITES;
+    const picked = preferred
+      .map((path) => items.find((item) => item.path === path))
+      .filter((item): item is NavItem => !!item)
+      .slice(0, 3);
+    return picked.length ? picked : items.slice(0, 3);
+  });
+
+  readonly quickActions = computed<QuickCreateAction[]>(() =>
+    QUICK_ACTIONS.filter((action) => this.auth.can(action.resource ?? '', 'create')),
   );
+
+  readonly quickPrimary = computed<QuickCreateAction | null>(() => {
+    const url = normalizeUrl(this.currentUrl());
+    const key = url.match(/^\/entities\/([^/]+)/)?.[1];
+    if (!key || ['invoices', 'receipts', 'expenses'].includes(key)) return null;
+    const def = this.meta.entity(key);
+    if (!def || !this.auth.can(def.resource, 'create')) return null;
+    const label = def.label.length + 5 > 16 ? 'เพิ่ม' : `เพิ่ม${def.label}`;
+    return { label, path: `/entities/${key}?new=1`, icon: 'plus', resource: def.resource };
+  });
 
   readonly allItems = computed<(NavItem & { group: string })[]>(() =>
     this.visibleGroups().flatMap((group) => group.items.map((item) => ({ ...item, group: group.label }))),
@@ -356,19 +449,21 @@ export class ShellComponent implements OnInit {
     const hit = items
       .filter((item) => (item.path === '/' ? url === '/' : url.startsWith(item.path)))
       .sort((a, b) => b.path.length - a.path.length)[0];
-    return hit ? { label: hit.label, group: hit.group } : { label: 'หน้า', group: 'SJP ERP' };
+    return hit ? { label: hit.label.length > 28 ? 'รายการ' : hit.label, group: hit.group } : { label: 'หน้า', group: 'SJP ERP' };
   });
 
   readonly initials = computed(() => (this.auth.user()?.name ?? '?').trim().charAt(0));
 
   ngOnInit(): void {
     document.documentElement.dataset['theme'] = this.theme();
+    document.documentElement.dataset['density'] = this.density();
     this.meta.load();
     this.loadApprovals();
     this.loadNotifications();
     this.router.events.pipe(filter((event) => event instanceof NavigationEnd)).subscribe((event) => {
-      this.currentUrl.set((event as NavigationEnd).urlAfterRedirects);
-      this.menuOpen.set(false);
+      const url = (event as NavigationEnd).urlAfterRedirects;
+      this.currentUrl.set(url);
+      this.closeMenu();
       this.userOpen.set(false);
       this.paletteOpen.set(false);
       this.paletteQuery.set('');
@@ -381,6 +476,12 @@ export class ShellComponent implements OnInit {
     window.addEventListener('keydown', this.hotkey);
   }
 
+  ngOnDestroy(): void {
+    window.removeEventListener('keydown', this.hotkey);
+    document.body.classList.remove('sb-lock');
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+  }
+
   toggleTheme(): void {
     const next = this.theme() === 'dark' ? 'light' : 'dark';
     this.theme.set(next);
@@ -388,10 +489,67 @@ export class ShellComponent implements OnInit {
     writeTheme(next);
   }
 
+  toggleDensity(): void {
+    const next: Density = this.density() === 'compact' ? 'comfy' : 'compact';
+    this.density.set(next);
+    document.documentElement.dataset['density'] = next;
+    writeDensity(next);
+  }
+
   toggleSidebar(): void {
     const next = !this.sidebarCollapsed();
     this.sidebarCollapsed.set(next);
     writeSidebarCollapsed(next);
+  }
+
+  openMenu(): void {
+    this.menuOpen.set(true);
+    document.body.classList.add('sb-lock');
+  }
+
+  closeMenu(): void {
+    this.menuOpen.set(false);
+    document.body.classList.remove('sb-lock');
+  }
+
+  toggleFavorite(path: string): void {
+    const current = this.favorites();
+    if (!current.includes(path) && current.length >= MAX_FAVORITES) {
+      this.toast.error(`ปักหมุดได้สูงสุด ${MAX_FAVORITES} รายการ`);
+      return;
+    }
+    const next = current.includes(path) ? current.filter((item) => item !== path) : [...current, path];
+    this.storedFavorites.set(next);
+    writeNavFavorites(next);
+  }
+
+  reorderFavorites(paths: string[]): void {
+    const visible = new Set(this.favorites());
+    const next = paths.filter((path) => visible.has(path)).slice(0, MAX_FAVORITES);
+    this.storedFavorites.set(next);
+    writeNavFavorites(next);
+  }
+
+  toggleGroup(label: string): void {
+    const labels = this.visibleGroups().map((group) => group.label);
+    const current = this.closedGroups();
+    const next = current.includes(label)
+      ? labels.filter((item) => item !== label)
+      : [...new Set([...current, label])];
+    this.closedGroups.set(next);
+    writeNavClosedGroups(next);
+  }
+
+  private syncActiveGroup(url: string, groups: NavGroup[]): void {
+    const group = groups.find((candidate) =>
+      candidate.items.some((item) => matchesPath(url, item.path)),
+    );
+    if (!group) return;
+    const closed = this.closedGroups();
+    const next = groups.map((candidate) => candidate.label).filter((label) => label !== group.label);
+    if (next.join('|') === closed.join('|')) return;
+    this.closedGroups.set(next);
+    writeNavClosedGroups(next);
   }
 
   private loadApprovals(): void {
@@ -422,6 +580,7 @@ export class ShellComponent implements OnInit {
 
   notificationLabel(item: NotificationItem): string {
     if (item.type === 'approval') return 'อนุมัติ';
+    if (item.type === 'vehicle') return 'จองรถ';
     if (item.tone === 'red') return 'เร่ง';
     return 'เตือน';
   }
@@ -479,7 +638,7 @@ export class ShellComponent implements OnInit {
 
   onOverlay(event: MouseEvent): void {
     if (event.target === event.currentTarget) {
-      this.menuOpen.set(false);
+      this.closeMenu();
       this.paletteOpen.set(false);
     }
   }
@@ -490,7 +649,7 @@ export class ShellComponent implements OnInit {
       this.openPalette();
     }
     if (event.key === 'Escape') {
-      this.menuOpen.set(false);
+      this.closeMenu();
       this.paletteOpen.set(false);
       this.userOpen.set(false);
     }

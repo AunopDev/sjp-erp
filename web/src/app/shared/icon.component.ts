@@ -40,10 +40,13 @@ const PATHS: Record<string, string> = {
 
 export const ICON_BY_PATH: Record<string, string> = {
   '/': 'home',
+  '/workspace': 'grid',
   '/my': 'check',
   '/approvals': 'bell',
   '/projects': 'folder',
   '/calendar': 'calendar',
+  '/vehicles': 'calendar',
+  '/entities/vehicles': 'truck',
   '/tickets': 'ticket',
   '/pm': 'wrench',
   '/purchase-orders': 'receipt',

@@ -28,11 +28,11 @@ interface StepData {
       <p class="muted small">{{ step.desc }} @if (step.source === 'document') { <span class="badge blue">workflow ตั้งต้นจากเอกสาร — รอยืนยัน</span> }</p>
       @if (data.pendingApproval) { <div class="notice warn">รออนุมัติจบขั้นตอนนี้</div> }
       <div class="form-grid">
-        <div class="field"><label>ผู้รับผิดชอบขั้นตอน</label><select [disabled]="!editable" [value]="owner" (change)="owner = $any($event.target).value"><option value="" [selected]="!owner">–</option>@for (user of users; track user.value) { <option [value]="user.value" [selected]="user.value === owner">{{ user.label }}</option> }</select></div>
-        <div class="field"><label>วันที่วางแผน</label><input type="date" [disabled]="!editable" [value]="plannedDate" (input)="plannedDate = $any($event.target).value" /></div>
+        <div class="field"><label for="lf-project-step-component-1">ผู้รับผิดชอบขั้นตอน</label><select id="lf-project-step-component-1" [disabled]="!editable" [value]="owner" (change)="owner = $any($event.target).value"><option value="" [selected]="!owner">–</option>@for (user of users; track user.value) { <option [value]="user.value" [selected]="user.value === owner">{{ user.label }}</option> }</select></div>
+        <div class="field"><label for="lf-project-step-component-2">วันที่วางแผน</label><input id="lf-project-step-component-2" type="date" [disabled]="!editable" [value]="plannedDate" (input)="plannedDate = $any($event.target).value" /></div>
       </div>
       @if (step.fields.length) { <app-fields [fields]="step.fields" [values]="values" [lists]="lists" [disabled]="!editable" (valuesChange)="values = $event" /> }
-      <div class="field" style="margin-top:10px"><label>หมายเหตุขั้นตอน</label><textarea rows="2" [disabled]="!editable" [value]="notes" (input)="notes = $any($event.target).value"></textarea></div>
+      <div class="field" style="margin-top:10px"><label for="lf-project-step-component-3">หมายเหตุขั้นตอน</label><textarea id="lf-project-step-component-3" rows="2" [disabled]="!editable" [value]="notes" (input)="notes = $any($event.target).value"></textarea></div>
 
       @if (step.docs.length) {
         <div style="margin-top:10px">
@@ -60,7 +60,7 @@ interface StepData {
       }
 
       @if (canEdit && !projectClosed) {
-        <div class="row" style="margin-top:12px">
+        <div class="form-actions">
           @if (editable) { <button type="button" class="btn" [disabled]="busy" (click)="save()">บันทึกข้อมูลขั้นตอน</button> }
           @if (current && data.status === 'pending') { <button type="button" class="btn" [disabled]="busy" (click)="runAction('start')">เริ่มขั้นตอน</button> }
           @if (current && (data.status === 'doing' || data.status === 'pending')) { <button type="button" class="btn primary" [disabled]="busy" (click)="runAction('complete')">จบขั้นตอน</button> }
@@ -155,9 +155,10 @@ export class ProjectStepComponent implements OnChanges {
     this.saveRequest()
       .pipe(switchMap(() => this.api.post(`/projects/${this.projectId}/steps/${this.step.key}/${action}`, {})))
       .subscribe({
-        next: () => {
+        next: (result) => {
           this.busy = false;
-          this.toast.show(action === 'complete' ? 'จบขั้นตอนแล้ว' : 'เริ่มขั้นตอนแล้ว');
+          const pending = !!(result as Record<string, unknown> | null)?.['_pendingApproval'];
+          this.toast.show(pending ? 'ส่งคำขออนุมัติแล้ว — รอผู้อนุมัติ' : action === 'complete' ? 'จบขั้นตอนแล้ว' : 'เริ่มขั้นตอนแล้ว');
           this.reload.emit();
           this.cdr.markForCheck();
         },

@@ -5,6 +5,7 @@ import { ToastService } from '../shared/toast.service';
 
 interface BackupSummary {
   exportedAt?: string;
+  encrypted?: boolean;
   users?: unknown[];
   records?: unknown[];
   settings?: unknown[];
@@ -20,12 +21,16 @@ interface BackupSummary {
   template: `
     <div class="card">
       <h3>สำรองข้อมูล</h3>
-      <p class="muted">ดาวน์โหลดข้อมูลหลักทั้งหมดเป็นไฟล์ JSON เพื่อเก็บไว้กู้คืนหรือย้ายระบบ</p>
-      <button type="button" class="btn primary" [disabled]="busy() || !auth.can('settings','edit')" (click)="exportBackup()">
+      <p class="muted">ดาวน์โหลดข้อมูลหลักทั้งหมดเป็นไฟล์ JSON ที่เข้ารหัสด้วย AES-256-GCM เพื่อเก็บไว้กู้คืนหรือย้ายระบบ</p>
+      <div class="field" style="max-width:320px">
+        <label for="lf-backup-restore-component-1">รหัสผ่านของคุณ (ยืนยันก่อนสำรอง)</label>
+        <input id="lf-backup-restore-component-1" type="password" autocomplete="current-password" [value]="exportPassword()" (input)="exportPassword.set($any($event.target).value)" />
+      </div>
+      <button type="button" class="btn primary" style="margin-top:12px" [disabled]="busy() || !exportPassword() || !auth.user()?.isAdmin" (click)="exportBackup()">
         {{ busy() === 'export' ? 'กำลังสร้างไฟล์…' : 'ดาวน์โหลดไฟล์สำรอง' }}
       </button>
       <div class="notice warn" style="margin-top:14px">
-        ไฟล์สำรองมีข้อมูลอ่อนไหว เช่น password hash, รหัส SMTP, LINE token และ HMAC secret — เก็บไฟล์ให้ปลอดภัยและอย่าแชร์ผ่านช่องทางสาธารณะ
+        ไฟล์สำรองมีข้อมูลอ่อนไหว เช่น password hash และข้อมูลธุรกิจทั้งหมด — รหัส SMTP/LINE และ webhook secret จะถูกทำให้ว่างในไฟล์สำรอง กรุณาเก็บไฟล์ให้ปลอดภัยและอย่าแชร์ผ่านช่องทางสาธารณะ
         ไฟล์แนบไบนารีถูกรวมแบบ base64 ทำให้ไฟล์ JSON มีขนาดใหญ่ตามจำนวนไฟล์
       </div>
     </div>
@@ -45,6 +50,7 @@ interface BackupSummary {
       </div>
       @if (summary(); as data) {
         <div class="wf-summary" style="margin-top:12px">
+          @if (data.encrypted) { <span class="badge green">ไฟล์เข้ารหัส AES-256-GCM</span> }
           <span class="badge gray">ส่งออกเมื่อ {{ data.exportedAt || 'ไม่ระบุ' }}</span>
           <span class="badge blue">{{ data.users?.length ?? 0 }} ผู้ใช้</span>
           <span class="badge green">{{ data.records?.length ?? 0 }} รายการ</span>
@@ -55,11 +61,15 @@ interface BackupSummary {
         </div>
       }
       <div class="field" style="margin-top:12px;max-width:320px">
-        <label>พิมพ์ RESTORE เพื่อยืนยัน</label>
-        <input [value]="confirmText()" (input)="confirmText.set($any($event.target).value)" placeholder="RESTORE" />
+        <label for="lf-backup-restore-component-2">พิมพ์ RESTORE เพื่อยืนยัน</label>
+        <input id="lf-backup-restore-component-2" [value]="confirmText()" (input)="confirmText.set($any($event.target).value)" placeholder="RESTORE" />
+      </div>
+      <div class="field" style="margin-top:12px;max-width:320px">
+        <label for="lf-backup-restore-component-3">รหัสผ่านของคุณ (ยืนยันตัวตน)</label>
+        <input id="lf-backup-restore-component-3" type="password" autocomplete="current-password" [value]="confirmPassword()" (input)="confirmPassword.set($any($event.target).value)" />
       </div>
       @if (error()) { <div class="err" style="margin-top:8px">{{ error() }}</div> }
-      <button type="button" class="btn danger" style="margin-top:12px" [disabled]="!payload() || confirmText() !== 'RESTORE' || busy() !== '' || !auth.can('settings','edit')" (click)="restore()">
+      <button type="button" class="btn danger" style="margin-top:12px" [disabled]="!payload() || confirmText() !== 'RESTORE' || !confirmPassword() || busy() !== '' || !auth.user()?.isAdmin" (click)="restore()">
         {{ busy() === 'restore' ? 'กำลังกู้คืน…' : 'กู้คืนข้อมูล' }}
       </button>
     </div>
@@ -79,11 +89,11 @@ interface BackupSummary {
       </div>
       @if (legacySummary()) { <div class="notice small" style="margin-top:10px">{{ legacySummary() }}</div> }
       <div class="field" style="margin-top:12px;max-width:320px">
-        <label>พิมพ์ IMPORT เพื่อยืนยัน</label>
-        <input [value]="legacyConfirm()" (input)="legacyConfirm.set($any($event.target).value)" placeholder="IMPORT" />
+        <label for="lf-backup-restore-component-4">พิมพ์ IMPORT เพื่อยืนยัน</label>
+        <input id="lf-backup-restore-component-4" [value]="legacyConfirm()" (input)="legacyConfirm.set($any($event.target).value)" placeholder="IMPORT" />
       </div>
       @if (legacyError()) { <div class="err" style="margin-top:8px">{{ legacyError() }}</div> }
-      <button type="button" class="btn primary" style="margin-top:12px" [disabled]="!legacyState() || legacyConfirm() !== 'IMPORT' || busy() !== '' || !auth.can('settings','edit')" (click)="importLegacy()">
+      <button type="button" class="btn primary" style="margin-top:12px" [disabled]="!legacyState() || legacyConfirm() !== 'IMPORT' || busy() !== '' || !auth.user()?.isAdmin" (click)="importLegacy()">
         {{ busy() === 'legacy' ? 'กำลังนำเข้า…' : 'นำเข้าข้อมูลเอกสาร' }}
       </button>
     </div>
@@ -97,7 +107,9 @@ export class BackupRestoreComponent {
 
   readonly busy = signal('');
   readonly error = signal('');
+  readonly exportPassword = signal('');
   readonly confirmText = signal('');
+  readonly confirmPassword = signal('');
   readonly payload = signal<Record<string, unknown> | null>(null);
   readonly summary = signal<BackupSummary | null>(null);
   readonly fileName = signal('');
@@ -111,7 +123,7 @@ export class BackupRestoreComponent {
     if (this.busy()) return;
     this.busy.set('export');
     this.error.set('');
-    this.api.get<Record<string, unknown>>('/backup/export').subscribe({
+    this.api.post<Record<string, unknown>>('/backup/export', { password: this.exportPassword() }).subscribe({
       next: (data) => {
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -140,6 +152,7 @@ export class BackupRestoreComponent {
     this.fileName.set(file.name);
     this.error.set('');
     this.confirmText.set('');
+    this.confirmPassword.set('');
     try {
       const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
       if (parsed['app'] !== 'sjp-erp') throw new Error('ไฟล์นี้ไม่ใช่ไฟล์สำรองของ SJP ERP');
@@ -157,7 +170,7 @@ export class BackupRestoreComponent {
     if (!payload || this.confirmText() !== 'RESTORE' || this.busy()) return;
     this.busy.set('restore');
     this.error.set('');
-    this.api.post('/backup/restore', { payload, confirm: 'RESTORE' }).subscribe({
+    this.api.post('/backup/restore', { payload, confirm: 'RESTORE', password: this.confirmPassword() }).subscribe({
       next: () => {
         this.busy.set('');
         this.toast.show('กู้คืนข้อมูลแล้ว — กรุณาเข้าสู่ระบบใหม่');

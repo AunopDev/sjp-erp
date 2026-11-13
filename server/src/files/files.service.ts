@@ -1,6 +1,7 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createReadStream, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { eq, like } from 'drizzle-orm';
 import type { Response } from 'express';
@@ -12,6 +13,7 @@ import { AuditService } from '../common/audit.service.js';
 import { nowIso } from '../common/dates.js';
 import { bad, forbidden, notFound } from '../common/exceptions.js';
 import { getEntity } from '../meta/entities.js';
+import { matchesFileSignature } from './file-signature.js';
 
 export interface UploadedFileInput {
   originalname: string;
@@ -33,6 +35,31 @@ export interface BackupFileEntry {
 }
 
 const MAX_SIZE = 15 * 1024 * 1024;
+const MAX_FILES_PER_USER = 500;
+const MAX_BYTES_PER_USER = 500 * 1024 * 1024;
+const MAX_BACKUP_BYTES = 250 * 1024 * 1024;
+
+const MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.csv': 'text/csv',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.zip': 'application/zip',
+  '.rar': 'application/vnd.rar',
+  '.7z': 'application/x-7z-compressed',
+  '.dwg': 'application/octet-stream',
+  '.dxf': 'application/octet-stream',
+};
 
 @Injectable()
 export class FilesService implements OnModuleInit {
@@ -46,22 +73,40 @@ export class FilesService implements OnModuleInit {
 
   onModuleInit(): void {
     if (!existsSync(this.dir)) mkdirSync(this.dir, { recursive: true });
+    try {
+      chmodSync(this.dir, 0o700);
+    } catch {
+      /* best effort — Windows may not support POSIX modes */
+    }
   }
 
-  save(user: SafeUser, file: UploadedFileInput | undefined) {
-    if (!file || !file.size) bad('กรุณาเลือกไฟล์');
-    if (file.size > MAX_SIZE) bad('ไฟล์ต้องมีขนาดไม่เกิน 15 MB');
-    const name = String(file.originalname ?? '').trim().slice(0, 255) || 'file';
+  async save(user: SafeUser, file: UploadedFileInput | undefined) {
+    this.access.requireUploadFiles(user);
+    if (!file || !file.buffer?.length) bad('กรุณาเลือกไฟล์');
+    if (file.buffer.length > MAX_SIZE) bad('ไฟล์ต้องมีขนาดไม่เกิน 15 MB');
+
+    const existing = this.db.select().from(files).where(eq(files.uploadedBy, user.id)).all();
+    if (existing.length >= MAX_FILES_PER_USER) bad(`อัปโหลดได้ไม่เกิน ${MAX_FILES_PER_USER} ไฟล์ต่อผู้ใช้`);
+    if (existing.reduce((sum, row) => sum + row.size, 0) + file.buffer.length > MAX_BYTES_PER_USER) {
+      bad('พื้นที่ไฟล์ของผู้ใช้เต็มแล้ว กรุณาลบไฟล์เก่าก่อน');
+    }
+
+    const name = String(file.originalname ?? '')
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+      .trim()
+      .slice(0, 255) || 'file';
     const ext = extname(name).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
+    const mime = MIME_BY_EXT[ext];
+    if (!mime) bad('ชนิดไฟล์นี้ไม่อนุญาตให้อัปโหลด');
+    if (!matchesFileSignature(ext, file.buffer)) bad('เนื้อหาไฟล์ไม่ตรงกับชนิดไฟล์ที่ระบุ');
     const id = crypto.randomUUID();
     const path = join(this.dir, `${id}${ext}`);
-    writeFileSync(path, file.buffer);
-    const mime = String(file.mimetype ?? '').trim() || 'application/octet-stream';
+    await writeFile(path, file.buffer, { mode: 0o600 });
     const row: typeof files.$inferInsert = {
       id,
       name,
       mime,
-      size: file.size,
+      size: file.buffer.length,
       path,
       uploadedBy: user.id,
       createdAt: nowIso(),
@@ -76,7 +121,8 @@ export class FilesService implements OnModuleInit {
     if (!row) notFound('ไม่พบไฟล์');
     if (!existsSync(row.path)) notFound('ไม่พบไฟล์บนเซิร์ฟเวอร์');
     if (!this.canRead(user, row)) forbidden('ไม่มีสิทธิ์เข้าถึงไฟล์นี้');
-    res.setHeader('Content-Type', row.mime);
+    const mime = /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(row.mime) ? row.mime : 'application/octet-stream';
+    res.setHeader('Content-Type', mime);
     res.setHeader('Content-Length', String(row.size));
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(row.name)}`);
@@ -118,11 +164,13 @@ export class FilesService implements OnModuleInit {
     });
   }
 
-  exportAll(): BackupFileEntry[] {    return this.db
-      .select()
-      .from(files)
-      .all()
-      .filter((row) => existsSync(row.path))
+  exportAll(): BackupFileEntry[] {
+    const rows = this.db.select().from(files).all().filter((row) => existsSync(row.path));
+    const total = rows.reduce((sum, row) => sum + (Number(row.size) || 0), 0);
+    if (total > MAX_BACKUP_BYTES) {
+      bad('ไฟล์แนบมีขนาดใหญ่เกินกว่าจะสำรองเป็น JSON ได้ กรุณาสำรองฐานข้อมูลโดยตรง');
+    }
+    return rows
       .map((row) => ({
         id: row.id,
         name: row.name,
@@ -137,12 +185,15 @@ export class FilesService implements OnModuleInit {
   restoreAll(entries: unknown): number {
     if (!Array.isArray(entries)) return 0;
     const prepared: { id: string; name: string; mime: string; uploadedBy: string | null; createdAt: string; buffer: Buffer; path: string }[] = [];
+    let totalBytes = 0;
     for (const raw of entries) {
       if (!raw || typeof raw !== 'object') continue;
       const entry = raw as Partial<BackupFileEntry>;
       if (!entry.data || !entry.name) continue;
       const buffer = Buffer.from(String(entry.data), 'base64');
       if (!buffer.length) continue;
+      totalBytes += buffer.length;
+      if (totalBytes > MAX_BACKUP_BYTES) bad('ไฟล์แนบในชุดสำรองมีขนาดใหญ่เกินไป');
       const baseName = String(entry.name).slice(0, 255);
       const id = /^[A-Za-z0-9-]{8,64}$/.test(String(entry.id ?? '')) ? String(entry.id) : crypto.randomUUID();
       const ext = extname(baseName).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
@@ -160,7 +211,7 @@ export class FilesService implements OnModuleInit {
 
     mkdirSync(this.dir, { recursive: true });
     // Write new files first so a failure never destroys existing attachments.
-    for (const file of prepared) writeFileSync(file.path, file.buffer);
+    for (const file of prepared) writeFileSync(file.path, file.buffer, { mode: 0o600 });
 
     this.db.transaction((tx) => {
       tx.delete(files).run();

@@ -46,8 +46,8 @@ const COLORS: [string, string][] = [
     <div class="card wf-card">
       <div class="wf-head">
         <div class="field" style="min-width:240px">
-          <label>Workflow ของ</label>
-          <select [value]="selected()" (change)="choose($any($event.target).value)">
+          <label for="lf-workflow-editor-component-1">Workflow ของ</label>
+          <select id="lf-workflow-editor-component-1" [value]="selected()" (change)="choose($any($event.target).value)">
             @for (key of keys(); track key) { <option [value]="key" [selected]="key === selected()">{{ labelOf(key) }}</option> }
           </select>
         </div>
@@ -62,10 +62,10 @@ const COLORS: [string, string][] = [
         <div class="notice warn" style="margin-top:14px">
           Workflow ของโครงการใช้โครงสร้างขั้นตอน (steps) — ใช้โหมด JSON ขั้นสูงสำหรับแก้ไข หรือแก้ขั้นตอนจากหน้ารายละเอียดโครงการ
         </div>
-        <div class="field" style="margin-top:12px"><label>JSON</label><textarea rows="22" spellcheck="false" [value]="jsonText()" (input)="jsonText.set($any($event.target).value)" class="json-area"></textarea></div>
+        <div class="field" style="margin-top:12px"><label for="lf-workflow-editor-component-2">JSON</label><textarea id="lf-workflow-editor-component-2" rows="22" spellcheck="false" [value]="jsonText()" (input)="jsonText.set($any($event.target).value)" class="json-area"></textarea></div>
       } @else if (jsonMode()) {
         <div class="notice small" style="margin-top:14px">โหมด JSON สำหรับแก้ไขละเอียด ระบบจะตรวจ key/สถานะที่อ้างถึงให้ก่อนบันทึก</div>
-        <div class="field" style="margin-top:12px"><label>JSON</label><textarea rows="22" spellcheck="false" [value]="jsonText()" (input)="jsonText.set($any($event.target).value)" class="json-area"></textarea></div>
+        <div class="field" style="margin-top:12px"><label for="lf-workflow-editor-component-3">JSON</label><textarea id="lf-workflow-editor-component-3" rows="22" spellcheck="false" [value]="jsonText()" (input)="jsonText.set($any($event.target).value)" class="json-area"></textarea></div>
       } @else if (draft(); as d) {
         <div class="wf-summary">
           <label class="check"><input type="checkbox" [checked]="d.confirmed" (change)="setConfirmed($any($event.target).checked)" /> ยืนยันใช้งาน workflow นี้</label>
@@ -88,9 +88,9 @@ const COLORS: [string, string][] = [
               <article class="wf-status" [class.off]="!status.enabled">
                 <header class="wf-status-head">
                   <span class="wf-index">{{ i + 1 }}</span>
-                  <div class="field grow"><label>ชื่อสถานะ</label><input [value]="status.label" (input)="setStatus(i, 'label', $any($event.target).value)" /></div>
-                  <div class="field wf-key-field"><label>key</label><input [value]="status.key" (input)="setStatusKey(i, $any($event.target).value)" /></div>
-                  <div class="field wf-color-field"><label>สี</label><select [value]="status.color" (change)="setStatus(i, 'color', $any($event.target).value)">@for (color of colors; track color[0]) { <option [value]="color[0]" [selected]="color[0] === status.color">{{ color[1] }}</option> }</select></div>
+                  <div class="field grow"><label [attr.for]="'lf-workflow-editor-component-4-' + i">ชื่อสถานะ</label><input [attr.id]="'lf-workflow-editor-component-4-' + i" [value]="status.label" (input)="setStatus(i, 'label', $any($event.target).value)" /></div>
+                  <div class="field wf-key-field"><label [attr.for]="'lf-workflow-editor-component-5-' + i">key</label><input [attr.id]="'lf-workflow-editor-component-5-' + i" [value]="status.key" (input)="setStatusKey(i, $any($event.target).value)" /></div>
+                  <div class="field wf-color-field"><label [attr.for]="'lf-workflow-editor-component-6-' + i">สี</label><select [attr.id]="'lf-workflow-editor-component-6-' + i" [value]="status.color" (change)="setStatus(i, 'color', $any($event.target).value)">@for (color of colors; track color[0]) { <option [value]="color[0]" [selected]="color[0] === status.color">{{ color[1] }}</option> }</select></div>
                   <div class="wf-status-tools">
                     <button type="button" class="btn ghost sm" (click)="toggleExpand(status.key)">{{ isExpanded(status.key) ? 'ย่อ' : 'แก้ไข' }}</button>
                     <button type="button" class="btn ghost sm" [disabled]="i === 0" (click)="move(i, -1)" title="เลื่อนขึ้น">↑</button>

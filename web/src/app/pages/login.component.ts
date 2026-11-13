@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../core/auth.service';
 import { apiErrorMessage } from '../core/api.service';
 
@@ -23,6 +23,7 @@ import { apiErrorMessage } from '../core/api.service';
             <input id="ln" [value]="name()" (input)="name.set($any($event.target).value)" autocomplete="name" autofocus />
           </div>
         }
+        @if (expired) { <div class="notice small" role="status">เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่</div> }
         <div class="field" [style.margin-top.px]="auth.firstRun() ? 12 : 0">
           <label for="lu">ชื่อผู้ใช้</label>
           <input id="lu" [value]="username()" (input)="username.set($any($event.target).value)" autocomplete="username" [autofocus]="!auth.firstRun()" />
@@ -57,6 +58,9 @@ import { apiErrorMessage } from '../core/api.service';
 export class LoginComponent {
   readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  readonly expired = this.route.snapshot.queryParamMap.get('expired') === '1';
+  private readonly redirectTo = this.route.snapshot.queryParamMap.get('redirect');
 
   readonly name = signal('');
   readonly username = signal('');
@@ -85,7 +89,8 @@ export class LoginComponent {
       } else {
         await this.auth.login(this.username(), this.password());
       }
-      await this.router.navigate(['/']);
+      const target = this.redirectTo && this.redirectTo.startsWith('/') && !this.redirectTo.startsWith('//') ? this.redirectTo : '/';
+      await this.router.navigateByUrl(target);
     } catch (error) {
       this.error.set(apiErrorMessage(error));
     } finally {

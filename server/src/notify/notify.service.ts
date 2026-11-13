@@ -8,6 +8,7 @@ import type { SafeUser } from '../auth/user.types.js';
 import { AccessService } from '../common/access.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { bad } from '../common/exceptions.js';
+import { assertSafeHost } from '../common/network-guard.js';
 import { EventsService, type EventRow } from '../events/events.service.js';
 
 const CONFIG_KEY = 'notify';
@@ -74,7 +75,7 @@ export class NotifyService implements OnModuleInit {
     };
   }
 
-  save(user: SafeUser, input: Partial<NotifyConfig>) {
+  async save(user: SafeUser, input: Partial<NotifyConfig>) {
     this.access.require(user, 'settings', 'edit');
     const current = this.read();
     if (input.mailTo !== undefined && String(input.mailTo).trim()) {
@@ -84,12 +85,20 @@ export class NotifyService implements OnModuleInit {
         .filter(Boolean);
       for (const email of recipients) if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) bad(`อีเมลผู้รับไม่ถูกต้อง: ${email}`);
     }
+    const smtpHost = String(input.smtpHost ?? current.smtpHost).trim();
+    if (smtpHost) {
+      try {
+        await assertSafeHost(smtpHost, process.env.SMTP_ALLOW_PRIVATE === 'true');
+      } catch (error) {
+        bad(error instanceof Error ? error.message : 'SMTP host ไม่ปลอดภัย');
+      }
+    }
     const next: NotifyConfig = {
       ...current,
       emailEnabled: input.emailEnabled ?? current.emailEnabled,
       lineEnabled: input.lineEnabled ?? current.lineEnabled,
       autoApproval: input.autoApproval ?? current.autoApproval,
-      smtpHost: String(input.smtpHost ?? current.smtpHost).trim(),
+      smtpHost,
       smtpPort: Number(input.smtpPort ?? current.smtpPort) || 587,
       smtpSecure: input.smtpSecure ?? current.smtpSecure,
       smtpUser: String(input.smtpUser ?? current.smtpUser).trim(),
@@ -142,6 +151,11 @@ export class NotifyService implements OnModuleInit {
     const to = config.mailTo || process.env.MAIL_TO || '';
     if (!host) bad('ยังไม่ได้ตั้งค่า SMTP host');
     if (!to) bad('ยังไม่ได้ตั้งค่าอีเมลผู้รับ');
+    try {
+      await assertSafeHost(host, process.env.SMTP_ALLOW_PRIVATE === 'true');
+    } catch (error) {
+      bad(error instanceof Error ? error.message : 'SMTP host ไม่ปลอดภัย');
+    }
     const transporter = nodemailer.createTransport({
       host,
       port,
@@ -154,8 +168,8 @@ export class NotifyService implements OnModuleInit {
       subject,
       text,
       html: `<div style="font-family:Tahoma,Segoe UI,sans-serif;white-space:pre-wrap;line-height:1.6">${escapeHtml(text)}</div>`,
-    }).catch((error: unknown) => {
-      throw bad(`ส่งอีเมลไม่สำเร็จ: ${error instanceof Error ? error.message : String(error)}`);
+    }).catch(() => {
+      throw bad('ส่งอีเมลไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า SMTP');
     });
   }
 

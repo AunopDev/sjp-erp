@@ -27,6 +27,7 @@ export interface ApprovalView extends ApprovalRow {
   decidedByName: string;
   approverRoleName: string;
   approverUserName: string;
+  canDecide: boolean;
 }
 
 @Injectable()
@@ -97,12 +98,12 @@ export class ApprovalStoreService {
     const pending = visible
       .filter((row) => row.status === 'pending')
       .sort((a, b) => b.at.localeCompare(a.at))
-      .map((row) => this.decorate(row));
+      .map((row) => this.decorate(row, this.access.isApprover(user, row.cfg as { approverRole?: string; approverUser?: string })));
     const decided = visible
       .filter((row) => row.status !== 'pending')
       .sort((a, b) => String(b.decidedAt ?? b.at).localeCompare(String(a.decidedAt ?? a.at)))
       .slice(0, 100)
-      .map((row) => this.decorate(row));
+      .map((row) => this.decorate(row, this.access.isApprover(user, row.cfg as { approverRole?: string; approverUser?: string })));
     return { pending, decided };
   }
 
@@ -130,7 +131,7 @@ export class ApprovalStoreService {
     return this.decorate(updated);
   }
 
-  private decorate(row: ApprovalRow): ApprovalView {
+  private decorate(row: ApprovalRow, canDecide = false): ApprovalView {
     const userRows = this.db.select().from(users).all();
     const roleRows = this.db.select().from(roles).all();
     const cfg = row.cfg as { approverRole?: string; approverUser?: string };
@@ -140,6 +141,7 @@ export class ApprovalStoreService {
       decidedByName: row.decidedBy ? (userRows.find((user) => user.id === row.decidedBy)?.name ?? row.decidedBy) : '',
       approverRoleName: cfg.approverRole ? (roleRows.find((role) => role.id === cfg.approverRole)?.name ?? cfg.approverRole) : '',
       approverUserName: cfg.approverUser ? (userRows.find((user) => user.id === cfg.approverUser)?.name ?? cfg.approverUser) : '',
+      canDecide,
     };
   }
 }

@@ -32,11 +32,28 @@ const num = (value: unknown): string => {
 
 @Injectable()
 export class PdfService {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
   constructor(
     private readonly records: RecordsService,
     private readonly access: AccessService,
     private readonly company: CompanyService,
   ) {}
+
+  private async acquire(): Promise<void> {
+    if (this.active < 2) {
+      this.active++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+    this.active++;
+  }
+
+  private release(): void {
+    this.active = Math.max(0, this.active - 1);
+    this.waiters.shift()?.();
+  }
 
   async render(user: SafeUser, entityKey: string, id: string): Promise<{ buffer: Buffer; filename: string }> {
     const def = this.access.requireEntity(user, entityKey, 'view');
@@ -47,6 +64,7 @@ export class PdfService {
     const pdfPath = join(dir, 'document.pdf');
     const profile = join(dir, 'profile');
     const browser = this.browserPath();
+    await this.acquire();
     try {
       writeFileSync(htmlPath, html, 'utf8');
       await execFileAsync(browser, [
@@ -67,6 +85,7 @@ export class PdfService {
       const safeCode = String(record.code ?? id).replace(/[^A-Za-z0-9._-]/g, '_');
       return { buffer, filename: `${safeCode}.pdf` };
     } finally {
+      this.release();
       rmSync(dir, { recursive: true, force: true });
     }
   }
@@ -108,7 +127,7 @@ export class PdfService {
     const sections: string[] = [];
     const basic: string[] = [];
     for (const field of def.fields) {
-      if (field.type === 'section' || field.type === 'formula' || field.hidden) continue;
+      if (field.type === 'section' || field.type === 'formula' || field.hidden || field.sensitive) continue;
       if (field.type === 'rows') continue;
       basic.push(
         `<tr><th>${escapeHtml(field.label)}</th><td>${this.value(field, row[field.key], labels[field.key], true)}</td></tr>`,

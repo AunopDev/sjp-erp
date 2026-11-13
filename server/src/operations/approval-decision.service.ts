@@ -33,6 +33,13 @@ export class ApprovalDecisionService {
     if (!this.access.isApprover(user, cfg)) bad('คุณไม่มีสิทธิ์อนุมัติคำขอนี้');
     if (!approve && !note.trim()) bad('กรุณาระบุเหตุผลที่ไม่อนุมัติ');
 
+    // Approval authority comes from the workflow configuration, not from the
+    // approver's edit rights on the underlying module (e.g. an executive may
+    // only have view access but is still the configured approver). Run the
+    // approved action as the approver with the edit gate lifted; the original
+    // user id is kept so audit trails still show who approved.
+    const acting: SafeUser = { ...user, isAdmin: true };
+
     if (approve) {
       const payload = row.payload as Record<string, unknown>;
       if (row.kind === 'transition') {
@@ -40,12 +47,12 @@ export class ApprovalDecisionService {
           comment: String(payload['comment'] ?? note ?? ''),
           fields: (payload['fields'] as Record<string, unknown> | undefined) ?? {},
         };
-        if (row.entity === 'tickets') this.tickets.status(user, row.recordId, row.key, opts);
-        else this.records.transition(user, row.entity, row.recordId, row.key, opts);
+        if (row.entity === 'tickets') this.tickets.status(acting, row.recordId, row.key, opts);
+        else this.records.transition(acting, row.entity, row.recordId, row.key, opts);
       } else if (row.kind === 'po-status') {
-        this.purchasing.status(user, row.recordId, row.key, String(payload['comment'] ?? '') || note || '');
+        this.purchasing.status(acting, row.recordId, row.key, String(payload['comment'] ?? '') || note || '');
       } else if (row.kind === 'project-step') {
-        this.projects.transit(user, row.recordId, String(payload['stepKey'] ?? row.key), 'complete', { reason: note });
+        this.projects.transit(acting, row.recordId, String(payload['stepKey'] ?? row.key), 'complete', { reason: note });
       } else {
         bad('ชนิดคำขออนุมัติไม่รองรับ');
       }

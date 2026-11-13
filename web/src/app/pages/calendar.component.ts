@@ -1,12 +1,10 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+﻿import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { ToastService } from '../shared/toast.service';
-import { IconComponent } from '../shared/icon.component';
-
 interface CalendarEvent {
   id: string;
-  type: 'appointment' | 'pm' | 'project' | 'po';
+  type: 'appointment' | 'pm' | 'project' | 'po' | 'vehicle';
   date: string;
   time: string;
   title: string;
@@ -31,7 +29,8 @@ interface CalendarResponse {
 
 const MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
-const TYPE_LABEL: Record<string, string> = { appointment: 'นัดหมาย', pm: 'PM', project: 'โครงการ', po: 'ใบสั่งซื้อ' };
+const TYPE_LABEL: Record<string, string> = { appointment: 'นัดหมาย', pm: 'PM', project: 'โครงการ', po: 'ใบสั่งซื้อ', vehicle: 'จองรถ' };
+const TYPE_SHORT: Record<string, string> = { appointment: 'นัด', pm: 'PM', project: 'ขั้นตอน', po: 'PO', vehicle: 'รถ' };
 
 const ymd = (date: Date): string => {
   const year = date.getFullYear();
@@ -43,13 +42,12 @@ const ymd = (date: Date): string => {
 @Component({
   selector: 'app-calendar',
   standalone: true,
-  imports: [IconComponent],
   template: `
     <div class="page">
       <div class="page-head">
         <div>
-          <h1><app-icon name="calendar" [size]="28" class="h1-ic" />ปฏิทินงาน</h1>
-          <div class="muted">นัดหมาย Ticket · งาน PM · ขั้นตอนโครงการ · กำหนดส่งใบสั่งซื้อ</div>
+          <h1>ปฏิทินงาน</h1>
+          <div class="muted">นัดหมาย Ticket · งาน PM · ขั้นตอนโครงการ · กำหนดส่งใบสั่งซื้อ · จองรถบริษัท</div>
         </div>
         <div class="page-actions calendar-actions">
           <button type="button" class="btn" (click)="move(-1)" aria-label="เดือนก่อนหน้า">‹</button>
@@ -67,6 +65,7 @@ const ymd = (date: Date): string => {
           <span><i class="ev-dot t-pm"></i> PM</span>
           <span><i class="ev-dot t-project"></i> โครงการ</span>
           <span><i class="ev-dot t-po"></i> ใบสั่งซื้อ</span>
+          <span><i class="ev-dot t-vehicle"></i> จองรถ</span>
         </div>
       </div>
 
@@ -79,7 +78,7 @@ const ymd = (date: Date): string => {
             <span class="day-num">{{ cell.day }}</span>
             <span class="day-events">
               @for (event of cell.events.slice(0, 3); track event.id) {
-                <span class="ev {{ eventClass(event) }}" [title]="event.title" (click)="open(event, $event)">{{ event.time ? event.time + ' ' : '' }}{{ event.title }}</span>
+                <span class="ev {{ eventClass(event) }}" [title]="event.title" (click)="open(event, $event)">{{ eventChip(event) }}</span>
               }
               @if (cell.events.length > 3) { <span class="ev-more">+{{ cell.events.length - 3 }}</span> }
             </span>
@@ -201,6 +200,10 @@ export class CalendarComponent implements OnInit {
     return TYPE_LABEL[type] ?? type;
   }
 
+  eventChip(event: CalendarEvent): string {
+    return event.time || TYPE_SHORT[event.type] || this.typeLabel(event.type);
+  }
+
   fmtDay(date: string): string {
     const value = new Date(`${date}T00:00:00`);
     return `${value.getDate()} ${MONTHS[value.getMonth()]}`;
@@ -213,3 +216,4 @@ export class CalendarComponent implements OnInit {
     if (!path) this.toast.error('ไม่พบลิงก์ของรายการนี้');
   }
 }
+

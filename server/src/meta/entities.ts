@@ -1,3 +1,5 @@
+import { NotFoundException } from '@nestjs/common';
+
 export type FieldType =
   | 'text'
   | 'textarea'
@@ -41,6 +43,7 @@ export interface FieldDef {
   help?: string;
   wide?: boolean;
   readOnly?: boolean;
+  sensitive?: boolean;
   formula?: string;
 }
 
@@ -56,6 +59,14 @@ export interface EntityDef {
   scoped?: boolean;
   system?: boolean;
   custom?: boolean;
+  /** Navigation group for custom modules, e.g. "งานบริการและโครงการ". */
+  group?: string;
+  /** Short label used by the sidebar; falls back to `label`. */
+  navLabel?: string;
+  /** Icon key used by the dynamic sidebar. */
+  icon?: string;
+  /** Short description shown in the module builder. */
+  description?: string;
 }
 
 export interface WorkflowStatus {
@@ -441,6 +452,8 @@ export const RESOURCE_LABELS: Record<string, string> = {
   settings: 'ตั้งค่าระบบ',
   users: 'ผู้ใช้',
   roles: 'บทบาท/สิทธิ์',
+  vehicles: 'รถบริษัท',
+  vehicleBookings: 'จองรถ',
 };
 
 export const ENTITY_DEFS: Record<string, EntityDef> = {
@@ -808,11 +821,56 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
       f('attachments', 'ใบเสร็จ/หลักฐาน', 'file'),
     ],
   },
+  vehicles: {
+    key: 'vehicles',
+    label: 'รถบริษัท',
+    resource: 'vehicles',
+    prefix: 'VEH',
+    title: 'name',
+    cols: ['code', 'name', 'plateNo', 'type', 'seats', 'status'],
+    filters: ['type', 'status'],
+    system: true,
+    fields: [
+      f('name', 'ชื่อรถ/รุ่น', 'text', { required: true }),
+      f('plateNo', 'ทะเบียนรถ', 'text', { required: true, unique: true }),
+      f('type', 'ประเภทรถ', 'select', { options: ['รถเก๋ง', 'รถกระบะ', 'รถตู้', 'อื่นๆ'], required: true }),
+      f('seats', 'จำนวนที่นั่ง', 'number'),
+      f('driver', 'พนักงานขับประจำ', 'ref', { ref: 'users' }),
+      f('status', 'สถานะรถ', 'select', { options: ['พร้อมใช้', 'ซ่อมบำรุง', 'ไม่พร้อมใช้'], required: true }),
+      f('note', 'หมายเหตุ', 'textarea'),
+    ],
+  },
+  vehicleBookings: {
+    key: 'vehicleBookings',
+    label: 'จองรถ',
+    resource: 'vehicleBookings',
+    prefix: 'VBK',
+    title: 'title',
+    cols: ['code', 'title', 'vehicle', 'requester', 'startAt', 'endAt', 'status'],
+    filters: ['status', 'vehicle'],
+    system: true,
+    fields: [
+      f('title', 'วัตถุประสงค์การเดินทาง', 'text', { required: true }),
+      f('vehicle', 'รถที่จอง', 'ref', { ref: 'vehicles', required: true }),
+      f('requester', 'ผู้จอง', 'text', { required: true }),
+      f('department', 'แผนก', 'text'),
+      f('destination', 'สถานที่ปลายทาง', 'text', { required: true }),
+      f('startAt', 'วันเวลาเริ่ม', 'datetime', { required: true }),
+      f('endAt', 'วันเวลาสิ้นสุด', 'datetime', { required: true }),
+      f('passengers', 'จำนวนผู้โดยสาร', 'number'),
+      f('driver', 'พนักงานขับรถ', 'ref', { ref: 'users' }),
+      f('status', 'สถานะการจอง', 'select', { options: ['รออนุมัติ', 'อนุมัติแล้ว', 'ไม่อนุมัติ', 'ยกเลิก', 'เสร็จสิ้น'], required: true }),
+      f('note', 'รายละเอียดเพิ่มเติม', 'textarea'),
+    ],
+  },
 };
 
+export const findEntity = (key: string): EntityDef | undefined =>
+  Object.prototype.hasOwnProperty.call(ENTITY_DEFS, key) ? ENTITY_DEFS[key] : undefined;
+
 export const getEntity = (key: string): EntityDef => {
-  const def = ENTITY_DEFS[key];
-  if (!def) throw new Error(`ไม่พบชนิดข้อมูล ${key}`);
+  const def = findEntity(key);
+  if (!def) throw new NotFoundException(`ไม่พบชนิดข้อมูล ${key}`);
   return def;
 };
 

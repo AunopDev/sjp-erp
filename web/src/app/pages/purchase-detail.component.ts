@@ -7,7 +7,7 @@ import { PdfService } from '../core/pdf.service';
 import { fmtDate, fmtDateTime, fmtMoney } from '../core/util';
 import { RecordFormComponent } from '../shared/record-form.component';
 import { ToastService } from '../shared/toast.service';
-import type { FieldDef, Option, RecordRow, WorkflowStatus } from '../core/models';
+import type { ApprovalRow, FieldDef, Option, RecordRow, WorkflowStatus } from '../core/models';
 
 interface ReceiveLine {
   item: string;
@@ -34,17 +34,23 @@ interface ReceiveLine {
           </div>
         </div>
         <div class="card"><span class="badge {{ statusColor(po['status']) }}">{{ statusLabel(po['status']) }}</span> <span class="muted small">สถานะ “รับบางส่วน/รับครบ” เปลี่ยนอัตโนมัติเมื่อบันทึกการรับสินค้า</span></div>
+        @if (pendingApprovals().length) {
+          <div class="notice small" role="status">
+            รออนุมัติ: {{ pendingApprovals()[0].title }} · ผู้อนุมัติ {{ pendingApprovals()[0].approverUserName || pendingApprovals()[0].approverRoleName || 'ผู้ดูแลระบบ' }}
+            — ติดตามผลได้ที่เมนู “คำขออนุมัติ”
+          </div>
+        }
 
         <div class="tabs">
           <button type="button" [class.active]="tab() === 'info'" (click)="tab.set('info')">รายละเอียด</button>
-          <button type="button" [class.active]="tab() === 'receive'" (click)="tab.set('receive')">การรับสินค้า ({{ receipts().length }})</button>
+          <button type="button" [class.active]="tab() === 'receive'" (click)="tab.set('receive')">การรับสินค้า <span class="tab-count">{{ receipts().length }}</span></button>
           <button type="button" [class.active]="tab() === 'audit'" (click)="tab.set('audit')">ประวัติ</button>
         </div>
 
         @if (tab() === 'info') {
           <div class="card">@for (field of fields().filter(f => f.key !== 'lines'); track field.key) { <div class="kv"><div class="k">{{ field.label }}</div><div class="v">{{ display(field, po) }}</div></div> }<div class="kv"><div class="k">มูลค่ารวม</div><div class="v">{{ fmtMoney(po['amount']) }} บาท</div></div></div>
           <div class="card"><h3>รายการ</h3>
-            <div class="table-wrap"><table class="mini"><thead><tr><th>สินค้า</th><th>สั่ง</th><th>ราคา/หน่วย</th><th>รับแล้ว</th></tr></thead>
+            <div class="table-wrap"><table class="mini po-lines"><thead><tr><th scope="col">สินค้า</th><th scope="col">สั่ง</th><th scope="col">ราคา/หน่วย</th><th scope="col">รับแล้ว</th></tr></thead>
               <tbody>@for (line of lines(po); track $index) { <tr><td>{{ lineLabel(po, line, $index) }}</td><td>{{ line['qty'] }}</td><td>{{ fmtMoney(line['unitPrice']) }}</td><td>{{ receivedFor(po, line) }}</td></tr> }</tbody>
             </table></div>
           </div>
@@ -69,18 +75,21 @@ interface ReceiveLine {
         <div class="overlay" (mousedown)="closeReceive($event)">
           <div class="menu-panel" role="dialog" aria-label="รับสินค้า">
             <div class="menu-head"><b>รับสินค้า / ตรวจรับ {{ po.code }}</b><span class="grow"></span><button type="button" class="icon-btn" (click)="receiveOpen.set(false)" aria-label="ปิด">×</button></div>
-            <div class="field"><label>รับเข้าคลัง</label><select [value]="warehouse()" (change)="warehouse.set($any($event.target).value)">@for (wh of warehouses(); track wh.value) { <option [value]="wh.value" [selected]="wh.value === warehouse()">{{ wh.label }}</option> }</select></div>
+            <div class="field"><label for="lf-purchase-detail-component-1">รับเข้าคลัง</label><select id="lf-purchase-detail-component-1" [value]="warehouse()" (change)="warehouse.set($any($event.target).value)">@for (wh of warehouses(); track wh.value) { <option [value]="wh.value" [selected]="wh.value === warehouse()">{{ wh.label }}</option> }</select></div>
+            @if (!warehouses().length) {
+              <div class="notice bad small">ยังไม่มีคลังสินค้า — เพิ่มคลังได้ที่หน้า “คลังสินค้า” ก่อนบันทึกการรับ</div>
+            }
             @for (line of receiveLines(); track line.item; let i = $index) {
               <div class="card" style="margin-top:10px">
                 <b>{{ labelForItem(line.item) }}</b> <span class="muted small">สั่ง {{ orderedFor(po, line.item) }} · รับแล้ว {{ receivedFor(po, { item: line.item }) }} · คงเหลือ {{ remainFor(po, line.item) }}</span>
                 <div class="form-grid" style="margin-top:6px">
-                  <div class="field"><label>จำนวนที่รับครั้งนี้</label><input type="number" min="0" [max]="remainFor(po, line.item)" [value]="line.qty" (input)="setReceive(i, 'qty', $any($event.target).value)" /></div>
-                  <div class="field wide"><label>Serial Number (คั่นด้วยขึ้นบรรทัดใหม่หรือ ,) — เฉพาะสินค้าที่ติดตาม Serial</label><textarea rows="3" [value]="line.serialNos" (input)="setReceive(i, 'serialNos', $any($event.target).value)"></textarea></div>
+                  <div class="field"><label [attr.for]="'lf-purchase-detail-component-2-' + i">จำนวนที่รับครั้งนี้</label><input [attr.id]="'lf-purchase-detail-component-2-' + i" type="number" min="0" [max]="remainFor(po, line.item)" [value]="line.qty" (input)="setReceive(i, 'qty', $any($event.target).value)" /></div>
+                  <div class="field wide"><label [attr.for]="'lf-purchase-detail-component-3-' + i">Serial Number (คั่นด้วยขึ้นบรรทัดใหม่หรือ ,) — เฉพาะสินค้าที่ติดตาม Serial</label><textarea [attr.id]="'lf-purchase-detail-component-3-' + i" rows="3" [value]="line.serialNos" (input)="setReceive(i, 'serialNos', $any($event.target).value)"></textarea></div>
                 </div>
               </div>
             }
             @if (receiveError()) { <div class="err" role="alert" style="margin-top:8px">{{ receiveError() }}</div> }
-            <div class="row" style="margin-top:12px"><button type="button" class="btn" (click)="receiveOpen.set(false)">ยกเลิก</button><button type="button" class="btn primary" [disabled]="receiveBusy()" (click)="doReceive()">บันทึกการรับ</button></div>
+            <div class="form-actions"><button type="button" class="btn" (click)="receiveOpen.set(false)">ยกเลิก</button><button type="button" class="btn primary" [disabled]="receiveBusy() || !warehouse()" (click)="doReceive()">บันทึกการรับ</button></div>
           </div>
         </div>
       }
@@ -108,6 +117,7 @@ export class PurchaseDetailComponent implements OnInit {
   readonly editOpen = signal(false);
   readonly receiveOpen = signal(false);
   readonly receiveBusy = signal(false);
+  readonly pendingApprovals = signal<ApprovalRow[]>([]);
   readonly receiveError = signal('');
   readonly receiveLines = signal<ReceiveLine[]>([]);
   readonly warehouse = signal('');
@@ -140,6 +150,7 @@ export class PurchaseDetailComponent implements OnInit {
       next: (po) => {
         this.record.set(po);
         this.loading.set(false);
+        this.api.get<ApprovalRow[]>(`/records/purchaseOrders/${id}/approvals`).subscribe({ next: (rows) => this.pendingApprovals.set(rows), error: () => this.pendingApprovals.set([]) });
         this.api.get<Record<string, unknown>[]>(`/audit/records/purchaseOrders/${id}`).subscribe({ next: (audit) => this.audit.set(audit), error: () => this.audit.set([]) });
       },
       error: (error: unknown) => {
@@ -198,8 +209,9 @@ export class PurchaseDetailComponent implements OnInit {
     if (!po) return;
     if (status.key === 'cancelled' && !confirm('ยืนยันยกเลิกใบสั่งซื้อนี้?')) return;
     this.api.post(`/purchase-orders/${po.id}/status`, { to: status.key }).subscribe({
-      next: () => {
-        this.toast.show('เปลี่ยนสถานะแล้ว');
+      next: (result) => {
+        const pending = !!(result as Record<string, unknown>)?.['_pendingApproval'];
+        this.toast.show(pending ? 'ส่งคำขออนุมัติแล้ว — รอผู้อนุมัติ' : 'เปลี่ยนสถานะแล้ว');
         this.load();
       },
       error: (error: unknown) => this.toast.error(apiErrorMessage(error)),

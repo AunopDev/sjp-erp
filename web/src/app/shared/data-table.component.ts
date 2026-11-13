@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, effect, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
 import { displayValue, downloadCsv } from '../core/util';
+import { readColumnPrefs, readTableViews, writeColumnPrefs, writeTableViews } from '../core/storage';
 import { IconComponent } from './icon.component';
 import { StateComponent } from './state.component';
 
-export type AnyRow = Record<string, any>;
+export type AnyRow = Record<string, unknown> & { _labels?: Record<string, string> };
 
 export interface ColumnDef {
   key: string;
@@ -26,6 +27,15 @@ export interface TabDef {
   test?: (row: AnyRow) => boolean;
 }
 
+interface SavedView {
+  id: string;
+  name: string;
+  q: string;
+  fv: Record<string, string>;
+  tab: string;
+  sort: { key: string; dir: 1 | -1 };
+}
+
 @Component({
   selector: 'app-data-table',
   standalone: true,
@@ -33,9 +43,9 @@ export interface TabDef {
   template: `
     <div class="dt">
       @if (tabs().length) {
-        <div class="utabs" role="tablist">
+        <div class="utabs" role="group" aria-label="ตัวกรองสถานะ">
           @for (item of tabs(); track item.key) {
-            <button type="button" role="tab" [attr.aria-selected]="tab() === item.key" [class.active]="tab() === item.key" (click)="tab.set(item.key)">
+            <button type="button" [attr.aria-pressed]="tab() === item.key" [class.active]="tab() === item.key" (click)="tab.set(item.key)">
               {{ item.label }}<span class="tab-count">{{ countFor(item) }}</span>
             </button>
           }
@@ -57,6 +67,45 @@ export interface TabDef {
         }
         <span class="grow"></span>
         <ng-content />
+        <div class="views-wrap">
+          <button type="button" class="btn tool" [class.on]="viewMenu()" [attr.aria-expanded]="viewMenu()" aria-haspopup="true" (click)="toggleViewMenu()">
+            <app-icon name="folder" [size]="18" /> มุมมอง
+            @if (savedViews().length) { <span class="tab-count">{{ savedViews().length }}</span> }
+          </button>
+          @if (viewMenu()) {
+            <div class="views-menu" role="dialog" aria-label="มุมมองที่บันทึก">
+              <div class="view-save">
+                <input [value]="viewName()" (input)="viewName.set($any($event.target).value)" placeholder="ตั้งชื่อมุมมอง…" aria-label="ชื่อมุมมอง" />
+                <button type="button" class="btn sm primary" [disabled]="!viewName().trim()" (click)="saveView()">บันทึก</button>
+              </div>
+              @if (!savedViews().length) {
+                <div class="view-empty">ยังไม่มีมุมมองที่บันทึก</div>
+              } @else {
+                @for (view of savedViews(); track view.id) {
+                  <div class="view-row">
+                    <button type="button" class="view-apply" (click)="applyView(view)">{{ view.name }}</button>
+                    <button type="button" class="view-del" (click)="deleteView(view.id, $event)" aria-label="ลบมุมมอง">×</button>
+                  </div>
+                }
+              }
+            </div>
+          }
+        </div>
+        <div class="cols-wrap">
+          <button type="button" class="btn tool" [class.on]="columnMenu()" [attr.aria-expanded]="columnMenu()" aria-haspopup="true" (click)="toggleColumnMenu()">
+            <app-icon name="columns" [size]="18" /> คอลัมน์
+          </button>
+          @if (columnMenu()) {
+            <div class="cols-menu" role="group" aria-label="เลือกคอลัมน์ที่แสดง">
+              @for (column of columns(); track column.key) {
+                <label class="cols-item">
+                  <input type="checkbox" [checked]="!hiddenColumns().includes(column.key)" (change)="toggleColumn(column.key)" />
+                  <span>{{ column.label }}</span>
+                </label>
+              }
+            </div>
+          }
+        </div>
         @if (canExport()) {
           <button type="button" class="btn tool" [disabled]="!filtered().length" (click)="exportCsv()">
             <app-icon name="download" [size]="18" /> ส่งออก CSV
@@ -78,28 +127,48 @@ export interface TabDef {
           }
         </div>
       }
+      @if (error() && rows().length) {
+        <div class="notice bad" role="alert">
+          {{ error() }}
+          <button type="button" class="btn sm" (click)="retry.emit()">ลองใหม่</button>
+        </div>
+      }
       <div class="tablecard">
-        @if (!rows().length) {
+        @if (error() && !rows().length) {
+          <app-state kind="error" [message]="error()" actionLabel="ลองใหม่" (action)="retry.emit()" />
+        } @else if (!rows().length) {
           <app-state kind="empty" [message]="emptyText()" [actionLabel]="emptyActionLabel()" (action)="emptyAction.emit()" />
         } @else if (!filtered().length) {
-          <app-state kind="empty" message="ไม่พบรายการที่ตรงกับการค้นหา/ตัวกรอง" />
+          <app-state
+            kind="empty"
+            message="ไม่พบรายการที่ตรงกับการค้นหา/ตัวกรอง"
+            actionLabel="ล้างตัวกรอง"
+            (action)="clearFilters()"
+          />
         } @else {
           <div class="table-wrap">
             <table class="tbl">
               <thead>
                 <tr>
-                  @for (column of columns(); track column.key) {
-                    <th class="sortable" [attr.aria-sort]="sort().key === column.key ? (sort().dir === 1 ? 'ascending' : 'descending') : 'none'" (click)="toggleSort(column.key)">
-                      {{ column.label }}
-                      @if (sort().key === column.key) { {{ sort().dir === 1 ? '▲' : '▼' }} }
+                  @for (column of visibleColumns(); track column.key) {
+                    <th scope="col" class="sortable" [attr.aria-sort]="sort().key === column.key ? (sort().dir === 1 ? 'ascending' : 'descending') : 'none'">
+                      <button type="button" class="th-sort" (click)="toggleSort(column.key)">
+                        {{ column.label }}
+                        @if (sort().key === column.key) { {{ sort().dir === 1 ? '▲' : '▼' }} }
+                      </button>
                     </th>
                   }
                 </tr>
               </thead>
               <tbody>
                 @for (row of pageRows(); track row['id']) {
-                  <tr [class]="'click ' + rowClass()(row)" (click)="rowClick.emit(row)">
-                    @for (column of columns(); track column.key) {
+                  <tr
+                    [class]="'click ' + rowClass()(row)"
+                    tabindex="0"
+                    (click)="rowClick.emit(row)"
+                    (keydown)="onRowKey($event, row)"
+                  >
+                    @for (column of visibleColumns(); track column.key) {
                       <td [attr.data-label]="column.label">
                         @if (column.badge) {
                           <span class="badge {{ column.badge(row) }}">{{ cell(row, column) }}</span>
@@ -116,7 +185,7 @@ export interface TabDef {
         }
       </div>
       <div class="pager">
-        <span class="muted">
+        <span class="muted" role="status" aria-live="polite">
           {{ filtered().length ? ((page() - 1) * size() + 1) + '–' + min(filtered().length, page() * size()) + ' จาก ' + filtered().length : '0 รายการ' }}
           @if (filtered().length !== rows().length && !tabs().length) { (ทั้งหมด {{ rows().length }}) }
         </span>
@@ -143,12 +212,14 @@ export class DataTableComponent implements OnInit {
   readonly searchPlaceholder = input('ค้นหา…');
   readonly emptyText = input('ยังไม่มีข้อมูล');
   readonly emptyActionLabel = input('');
+  readonly error = input('');
   readonly rowClass = input<(row: AnyRow) => string>(() => '');
   readonly initialTab = input('');
   readonly initialFilters = input<Record<string, string>>({});
 
   readonly rowClick = output<Record<string, unknown>>();
   readonly emptyAction = output<void>();
+  readonly retry = output<void>();
 
   readonly q = signal('');
   readonly fv = signal<Record<string, string>>({});
@@ -157,7 +228,19 @@ export class DataTableComponent implements OnInit {
   readonly size = signal(25);
   readonly tab = signal('');
   readonly showFilters = signal(false);
+  readonly hiddenColumns = signal<string[]>([]);
+  readonly columnMenu = signal(false);
+  readonly savedViews = signal<SavedView[]>([]);
+  readonly viewMenu = signal(false);
+  readonly viewName = signal('');
   readonly sizes = [10, 25, 50, 100];
+  private readonly host = inject(ElementRef) as ElementRef<HTMLElement>;
+
+  readonly visibleColumns = computed(() => {
+    const hidden = new Set(this.hiddenColumns());
+    const visible = this.columns().filter((column) => !hidden.has(column.key));
+    return visible.length ? visible : this.columns();
+  });
 
   readonly filtered = computed(() => {
     let out = this.rows();
@@ -206,6 +289,66 @@ export class DataTableComponent implements OnInit {
       this.tab();
       this.page.set(1);
     });
+    effect(() => {
+      this.hiddenColumns.set(readColumnPrefs(this.exportName()));
+    });
+    effect(() => {
+      const raw = readTableViews(this.exportName());
+      this.savedViews.set(raw.filter((view): view is SavedView => this.isSavedView(view)));
+    });
+  }
+
+  private isSavedView(value: unknown): value is SavedView {
+    if (!value || typeof value !== 'object') return false;
+    const view = value as Partial<SavedView>;
+    return typeof view.id === 'string' && typeof view.name === 'string' && typeof view.q === 'string';
+  }
+
+  toggleViewMenu(): void {
+    const next = !this.viewMenu();
+    this.viewMenu.set(next);
+    this.columnMenu.set(false);
+  }
+
+  toggleColumnMenu(): void {
+    const next = !this.columnMenu();
+    this.columnMenu.set(next);
+    this.viewMenu.set(false);
+  }
+
+  saveView(): void {
+    const name = this.viewName().trim();
+    if (!name) return;
+    const existing = this.savedViews().find((view) => view.name.toLowerCase() === name.toLowerCase());
+    const view: SavedView = {
+      id: existing?.id ?? `${Date.now()}`,
+      name,
+      q: this.q(),
+      fv: { ...this.fv() },
+      tab: this.tab(),
+      sort: { ...this.sort() },
+    };
+    const next = existing
+      ? this.savedViews().map((item) => (item.id === existing.id ? view : item))
+      : [...this.savedViews(), view].slice(-12);
+    this.savedViews.set(next);
+    writeTableViews(this.exportName(), next);
+    this.viewName.set('');
+  }
+
+  applyView(view: SavedView): void {
+    this.q.set(view.q ?? '');
+    this.fv.set({ ...(view.fv ?? {}) });
+    this.tab.set(view.tab ?? '');
+    this.sort.set(view.sort?.key ? view.sort : { key: '', dir: 1 });
+    this.viewMenu.set(false);
+  }
+
+  deleteView(id: string, event: MouseEvent): void {
+    event.stopPropagation();
+    const next = this.savedViews().filter((view) => view.id !== id);
+    this.savedViews.set(next);
+    writeTableViews(this.exportName(), next);
   }
 
   ngOnInit(): void {
@@ -230,6 +373,40 @@ export class DataTableComponent implements OnInit {
     this.sort.update((sort) => (sort.key === key ? { key, dir: sort.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
   }
 
+  onRowKey(event: KeyboardEvent, row: AnyRow): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    this.rowClick.emit(row);
+  }
+
+  clearFilters(): void {
+    this.q.set('');
+    this.fv.set({});
+  }
+
+  toggleColumn(key: string): void {
+    const current = this.hiddenColumns();
+    const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
+    if (this.columns().length - next.length < 1) return;
+    this.hiddenColumns.set(next);
+    writeColumnPrefs(this.exportName(), next);
+  }
+
+  @HostListener('document:pointerdown', ['$event'])
+  onPointer(event: PointerEvent): void {
+    if (!this.columnMenu() && !this.viewMenu()) return;
+    const target = event.target as Node | null;
+    if (target && this.host.nativeElement.contains(target)) return;
+    this.columnMenu.set(false);
+    this.viewMenu.set(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    this.columnMenu.set(false);
+    this.viewMenu.set(false);
+  }
+
   countFor(tab: TabDef): number {
     return tab.test ? this.rows().filter(tab.test).length : this.rows().length;
   }
@@ -248,8 +425,9 @@ export class DataTableComponent implements OnInit {
 
   exportCsv(): void {
     const rows = this.filtered();
-    const data = rows.map((row) => this.columns().map((column) => this.rawValue(row, column) ?? ''));
-    downloadCsv(`${this.exportName()}-${new Date().toISOString().slice(0, 10)}.csv`, this.columns().map((c) => c.label), data);
+    const columns = this.visibleColumns();
+    const data = rows.map((row) => columns.map((column) => this.rawValue(row, column) ?? ''));
+    downloadCsv(`${this.exportName()}-${new Date().toISOString().slice(0, 10)}.csv`, columns.map((c) => c.label), data);
   }
 }
 

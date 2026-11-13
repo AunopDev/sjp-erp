@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AccessService } from '../common/access.service.js';
 import { ApprovalStoreService } from '../common/approvals.service.js';
-import { todayStr } from '../common/dates.js';
+import { dateKeyOf, timeKeyOf, todayStr } from '../common/dates.js';
 import type { SafeUser } from '../auth/user.types.js';
 import { projectSteps, WORKFLOWS } from '../meta/entities.js';
 import { RecordsService } from '../records/records.service.js';
@@ -15,7 +15,7 @@ const SLA_HOURS: Record<string, number> = {
 
 export interface NotificationItem {
   id: string;
-  type: 'approval' | 'ticket' | 'pm' | 'project' | 'po';
+  type: 'approval' | 'ticket' | 'pm' | 'project' | 'po' | 'vehicle';
   tone: 'red' | 'amber' | 'blue';
   title: string;
   subtitle: string;
@@ -46,6 +46,23 @@ export class NotificationsService {
       });
     }
 
+    if (this.access.canEntity(user, 'vehicleBookings', 'approve')) {
+      for (const booking of this.records.all(user, 'vehicleBookings')) {
+        if (String(booking['status'] ?? '') !== 'รออนุมัติ') continue;
+        const day = dateKeyOf(booking['startAt']);
+        if (!day) continue;
+        const vehicle = booking['vehicle'] ? this.records.labelOf('vehicles', String(booking['vehicle']), user) : 'รถบริษัท';
+        items.push({
+          id: `vehicle-${booking.id}`,
+          type: 'vehicle',
+          tone: 'amber',
+          title: `รออนุมัติจองรถ: ${String(booking['title'] ?? booking.code)}`,
+          subtitle: `${vehicle} · ${day} ${timeKeyOf(booking['startAt'])} · ${String(booking['requester'] ?? '')}`,
+          link: `/vehicles?date=${day}&booking=${booking.id}`,
+        });
+      }
+    }
+
     if (this.access.canEntity(user, 'tickets', 'view')) {
       const statuses = WORKFLOWS.ticket.statuses;
       const now = Date.now();
@@ -73,7 +90,7 @@ export class NotificationsService {
       for (const record of this.records.all(user, 'pmRecords')) {
         const due = String(record['dueDate'] ?? '');
         if (!due || record['status'] === 'เสร็จ' || due >= today) continue;
-        const plan = record['plan'] ? this.records.labelOf('pmPlans', String(record['plan'])) : 'งาน PM';
+        const plan = record['plan'] ? this.records.labelOf('pmPlans', String(record['plan']), user) : 'งาน PM';
         items.push({
           id: `pm-${record.id}`,
           type: 'pm',

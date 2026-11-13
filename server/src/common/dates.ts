@@ -16,6 +16,34 @@ export function todayStr(timeZone = process.env.APP_TIMEZONE || DEFAULT_TIMEZONE
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+/** YYYY-MM-DD of an instant in the business timezone (not UTC). */
+export function dateKeyOf(value: unknown, timeZone = process.env.APP_TIMEZONE || DEFAULT_TIMEZONE): string {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+/** HH:mm of an instant in the business timezone (not UTC). */
+export function timeKeyOf(value: unknown, timeZone = process.env.APP_TIMEZONE || DEFAULT_TIMEZONE): string {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return String(value).slice(11, 16);
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date);
+}
+
 export const isDateOnly = (value: unknown): value is string => {
   if (typeof value !== 'string' || !DATE_ONLY.test(value)) return false;
   const [y, m, d] = value.split('-').map(Number);

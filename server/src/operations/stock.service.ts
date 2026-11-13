@@ -181,7 +181,7 @@ export class StockService {
           at: nowIso(),
           by: user.id,
           type,
-          text: `เบิกไป ${input.project ? this.records.labelOf('projects', String(input.project)) : ''} ${site ? this.records.labelOf('sites', site.id) : ''} ${input.ticket ? `(Ticket ${this.records.labelOf('tickets', String(input.ticket))})` : ''} ผู้รับ: ${input.recipient || '–'} (${move.code})`,
+          text: `เบิกไป ${input.project ? this.records.labelOf('projects', String(input.project), user) : ''} ${site ? this.records.labelOf('sites', site.id, user) : ''} ${input.ticket ? `(Ticket ${this.records.labelOf('tickets', String(input.ticket), user)})` : ''} ผู้รับ: ${input.recipient || '–'} (${move.code})`,
           ref,
         });
       }

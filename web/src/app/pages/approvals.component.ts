@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
+import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
 import { fmtDateTime } from '../core/util';
 import { ToastService } from '../shared/toast.service';
@@ -29,12 +30,21 @@ import type { ApprovalRow } from '../core/models';
               <div style="flex:1">
                 <b>{{ row.title }}</b>
                 <div class="muted small">{{ row.byName }} · {{ fmtDateTime(row.at) }} · ผู้อนุมัติ: {{ approverLabel(row) }}</div>
-                <div class="row" style="margin-top:8px">
-                  <input placeholder="หมายเหตุ (จำเป็นเมื่อไม่อนุมัติ)" [value]="notes()[row.id] ?? ''" (input)="setNote(row.id, $any($event.target).value)" style="max-width:380px" />
-                  <button type="button" class="btn primary" [disabled]="busy() === row.id" (click)="decide(row, true)">อนุมัติ</button>
-                  <button type="button" class="btn danger" [disabled]="busy() === row.id" (click)="decide(row, false)">ไม่อนุมัติ</button>
-                  <button type="button" class="btn ghost" (click)="open(row)">เปิดเอกสาร</button>
-                </div>
+                @if (row.canDecide) {
+                  <div class="row" style="margin-top:8px">
+                    <input placeholder="หมายเหตุ (จำเป็นเมื่อไม่อนุมัติ)" [value]="notes()[row.id] ?? ''" (input)="setNote(row.id, $any($event.target).value)" style="max-width:380px" />
+                    <button type="button" class="btn primary" [disabled]="busy() === row.id" (click)="decide(row, true)">อนุมัติ</button>
+                    <button type="button" class="btn danger" [disabled]="busy() === row.id" (click)="decide(row, false)">ไม่อนุมัติ</button>
+                    <button type="button" class="btn ghost" (click)="open(row)">เปิดเอกสาร</button>
+                  </div>
+                } @else {
+                  <div class="row muted small" style="margin-top:8px">
+                    <span class="badge amber">รอผู้อนุมัติ</span>
+                    @if (row.by === auth.user()?.id) { <span>คำขอของคุณ — รอ {{ approverLabel(row) }} พิจารณา</span> }
+                    @else { <span>คุณดูได้อย่างเดียว ไม่ได้เป็นผู้อนุมัติคำขอนี้</span> }
+                    <button type="button" class="btn ghost" (click)="open(row)">เปิดเอกสาร</button>
+                  </div>
+                }
                 @if (errorFor() === row.id) { <div class="err">{{ error() }}</div> }
               </div>
             </div>
@@ -66,6 +76,7 @@ import type { ApprovalRow } from '../core/models';
 })
 export class ApprovalsComponent implements OnInit {
   private readonly api = inject(ApiService);
+  readonly auth = inject(AuthService);
   private readonly meta = inject(MetaService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);

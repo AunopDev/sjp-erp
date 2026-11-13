@@ -73,6 +73,16 @@ export class RecordsController {
     return this.records.archive(user, entity, id, String(body?.reason ?? ''));
   }
 
+  @Post(':entity/:id/decision')
+  decide(
+    @CurrentUser() user: SafeUser,
+    @Param('entity') entity: string,
+    @Param('id') id: string,
+    @Body() body: { decision?: string; note?: string },
+  ) {
+    return this.records.decideVehicleBooking(user, entity, id, String(body?.decision ?? ''), String(body?.note ?? ''));
+  }
+
   @Post(':entity/:id/restore')
   restore(@CurrentUser() user: SafeUser, @Param('entity') entity: string, @Param('id') id: string) {
     return this.records.restore(user, entity, id);

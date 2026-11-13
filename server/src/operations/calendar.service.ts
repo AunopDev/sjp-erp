@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { AccessService } from '../common/access.service.js';
-import { isDateOnly, todayStr } from '../common/dates.js';
+import { dateKeyOf, isDateOnly, timeKeyOf, todayStr } from '../common/dates.js';
 import type { SafeUser } from '../auth/user.types.js';
 import { projectSteps } from '../meta/entities.js';
 import { RecordsService } from '../records/records.service.js';
 
 export interface CalendarEvent {
   id: string;
-  type: 'appointment' | 'pm' | 'project' | 'po';
+  type: 'appointment' | 'pm' | 'project' | 'po' | 'vehicle';
   date: string;
   time: string;
   title: string;
@@ -15,6 +15,7 @@ export interface CalendarEvent {
   status: string;
   link: string;
 }
+
 
 @Injectable()
 export class CalendarService {
@@ -39,7 +40,7 @@ export class CalendarService {
         const appointments = Array.isArray(ticket['appointments']) ? (ticket['appointments'] as Record<string, unknown>[]) : [];
         for (const appointment of appointments) {
           if (!inRange(appointment['date'])) continue;
-          const tech = appointment['tech'] ? this.records.labelOf('users', String(appointment['tech'])) : 'ยังไม่ระบุช่าง';
+          const tech = appointment['tech'] ? this.records.labelOf('users', String(appointment['tech']), user) : 'ยังไม่ระบุช่าง';
           events.push({
             id: `ticket-${ticket.id}-${String(appointment['id'] ?? appointment['date'])}`,
             type: 'appointment',
@@ -57,8 +58,8 @@ export class CalendarService {
     if (this.access.canEntity(user, 'pmRecords', 'view')) {
       for (const record of this.records.all(user, 'pmRecords')) {
         if (record['status'] === 'เสร็จ' || !inRange(record['dueDate'])) continue;
-        const plan = record['plan'] ? this.records.labelOf('pmPlans', String(record['plan'])) : 'งาน PM';
-        const site = record['site'] ? this.records.labelOf('sites', String(record['site'])) : '';
+        const plan = record['plan'] ? this.records.labelOf('pmPlans', String(record['plan']), user) : 'งาน PM';
+        const site = record['site'] ? this.records.labelOf('sites', String(record['site']), user) : '';
         events.push({
           id: `pm-${record.id}`,
           type: 'pm',
@@ -94,11 +95,30 @@ export class CalendarService {
       }
     }
 
+    if (this.access.canEntity(user, 'vehicleBookings', 'view')) {
+      for (const booking of this.records.all(user, 'vehicleBookings')) {
+        if (['ยกเลิก', 'ไม่อนุมัติ'].includes(String(booking['status'] ?? ''))) continue;
+        const start = dateKeyOf(booking['startAt']);
+        if (!inRange(start)) continue;
+        const vehicle = booking['vehicle'] ? this.records.labelOf('vehicles', String(booking['vehicle']), user) : 'รถบริษัท';
+        events.push({
+          id: `vehicle-${booking.id}`,
+          type: 'vehicle',
+          date: start,
+          time: timeKeyOf(booking['startAt']),
+          title: `จองรถ: ${String(booking['title'] ?? booking.code)}`,
+          subtitle: [vehicle, String(booking['requester'] ?? '')].filter(Boolean).join(' · '),
+          status: String(booking['status'] ?? ''),
+          link: `/vehicles?date=${start}&booking=${booking.id}`,
+        });
+      }
+    }
+
     if (this.access.canEntity(user, 'purchaseOrders', 'view')) {
       for (const po of this.records.all(user, 'purchaseOrders')) {
         if (['received', 'closed', 'cancelled'].includes(String(po['status'] ?? ''))) continue;
         if (!inRange(po['dueDate'])) continue;
-        const vendor = po['vendor'] ? this.records.labelOf('vendors', String(po['vendor'])) : '';
+        const vendor = po['vendor'] ? this.records.labelOf('vendors', String(po['vendor']), user) : '';
         events.push({
           id: `po-${po.id}`,
           type: 'po',

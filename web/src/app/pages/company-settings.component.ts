@@ -40,14 +40,14 @@ const EMPTY: CompanyInfo = {
       </div>
 
       <div class="form-grid">
-        <div class="field"><label>ชื่อบริษัท (ไทย) *</label><input [value]="company().name" (input)="set('name', $any($event.target).value)" /></div>
-        <div class="field"><label>ชื่อบริษัท (EN)</label><input [value]="company().nameEn" (input)="set('nameEn', $any($event.target).value)" /></div>
-        <div class="field"><label>เลขประจำตัวผู้เสียภาษี</label><input [value]="company().taxId" (input)="set('taxId', $any($event.target).value)" /></div>
-        <div class="field"><label>โทรศัพท์</label><input [value]="company().phone" (input)="set('phone', $any($event.target).value)" /></div>
-        <div class="field"><label>อีเมล</label><input [value]="company().email" (input)="set('email', $any($event.target).value)" /></div>
-        <div class="field"><label>เว็บไซต์</label><input [value]="company().website" (input)="set('website', $any($event.target).value)" /></div>
-        <div class="field wide"><label>ที่อยู่</label><textarea rows="3" [value]="company().address" (input)="set('address', $any($event.target).value)"></textarea></div>
-        <div class="field wide"><label>หมายเหตุท้ายเอกสาร (เช่น เงื่อนไขชำระ)</label><textarea rows="3" [value]="company().footerNote" (input)="set('footerNote', $any($event.target).value)"></textarea></div>
+        <div class="field"><label for="lf-company-settings-component-1">ชื่อบริษัท (ไทย) *</label><input id="lf-company-settings-component-1" [value]="company().name" (input)="set('name', $any($event.target).value)" /></div>
+        <div class="field"><label for="lf-company-settings-component-2">ชื่อบริษัท (EN)</label><input id="lf-company-settings-component-2" [value]="company().nameEn" (input)="set('nameEn', $any($event.target).value)" /></div>
+        <div class="field"><label for="lf-company-settings-component-3">เลขประจำตัวผู้เสียภาษี</label><input id="lf-company-settings-component-3" [value]="company().taxId" (input)="set('taxId', $any($event.target).value)" /></div>
+        <div class="field"><label for="lf-company-settings-component-4">โทรศัพท์</label><input id="lf-company-settings-component-4" [value]="company().phone" (input)="set('phone', $any($event.target).value)" /></div>
+        <div class="field"><label for="lf-company-settings-component-5">อีเมล</label><input id="lf-company-settings-component-5" [value]="company().email" (input)="set('email', $any($event.target).value)" /></div>
+        <div class="field"><label for="lf-company-settings-component-6">เว็บไซต์</label><input id="lf-company-settings-component-6" [value]="company().website" (input)="set('website', $any($event.target).value)" /></div>
+        <div class="field wide"><label for="lf-company-settings-component-7">ที่อยู่</label><textarea id="lf-company-settings-component-7" rows="3" [value]="company().address" (input)="set('address', $any($event.target).value)"></textarea></div>
+        <div class="field wide"><label for="lf-company-settings-component-8">หมายเหตุท้ายเอกสาร (เช่น เงื่อนไขชำระ)</label><textarea id="lf-company-settings-component-8" rows="3" [value]="company().footerNote" (input)="set('footerNote', $any($event.target).value)"></textarea></div>
       </div>
       @if (message()) { <div class="notice" [class.bad]="error()" style="margin-top:12px">{{ message() }}</div> }
     </div>

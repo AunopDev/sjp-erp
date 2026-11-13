@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
@@ -28,9 +28,11 @@ import type { ListResponse, ProjectStepDef, RecordRow } from '../core/models';
         [canExport]="auth.can('projects', 'export')"
         [emptyText]="'ยังไม่มีโครงการ — กด “สร้างโครงการ”'"
         [emptyActionLabel]="auth.can('projects', 'create') ? '+ สร้างโครงการ' : ''"
+        [error]="loadError()"
         [rowClass]="rowClass"
         (rowClick)="open($event)"
         (emptyAction)="formOpen.set(true)"
+        (retry)="load()"
       />
     </div>
     @if (formOpen()) {
@@ -44,9 +46,11 @@ export class ProjectsComponent implements OnInit {
   readonly meta = inject(MetaService);
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly toast = inject(ToastService);
 
   readonly rows = signal<RecordRow[]>([]);
+  readonly loadError = signal('');
   readonly formOpen = signal(false);
   readonly fields = computed(() => this.meta.entity('projects')?.fields ?? []);
   readonly tabs: TabDef[] = [
@@ -59,12 +63,22 @@ export class ProjectsComponent implements OnInit {
   ngOnInit(): void {
     this.meta.load();
     this.load();
+    this.route.queryParamMap.subscribe((params) => {
+      if (params.get('new') !== '1' || !this.auth.can('projects', 'create')) return;
+      this.formOpen.set(true);
+      void this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
+    });
   }
 
   load(): void {
+    this.loadError.set('');
     this.api.get<ListResponse<RecordRow>>('/records/projects', { pageSize: 500, sort: '-_createdAt' }).subscribe({
       next: (result) => this.rows.set(result.items),
-      error: (error: unknown) => this.toast.error(apiErrorMessage(error)),
+      error: (error: unknown) => {
+        const message = apiErrorMessage(error);
+        this.loadError.set(message);
+        this.toast.error(message);
+      },
     });
   }
 

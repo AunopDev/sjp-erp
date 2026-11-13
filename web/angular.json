@@ -30,6 +30,12 @@
           },
           "configurations": {
             "production": {
+              "index": { "input": "src/index.production.html", "output": "index.html" },
+              "optimization": {
+                "scripts": true,
+                "styles": { "minify": true, "inlineCritical": false },
+                "fonts": true
+              },
               "budgets": [
                 {
                   "type": "initial",

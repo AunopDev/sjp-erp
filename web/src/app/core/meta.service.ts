@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import { Observable, of, tap } from 'rxjs';
+import { Observable, of, shareReplay, tap } from 'rxjs';
 import { ApiService } from './api.service';
 import type { EntityDef, MetaResponse, Option, ProjectStepDef, WorkflowStatus } from './models';
 
@@ -9,20 +9,38 @@ export class MetaService {
   readonly loading = signal(false);
   private readonly optionCache = new Map<string, Option[]>();
   private started = false;
+  private request$: Observable<MetaResponse> | null = null;
 
   constructor(private readonly api: ApiService) {}
+
+  /** Loads metadata once and lets guards await it before activation. */
+  ensureLoaded(): Observable<MetaResponse> {
+    const current = this.meta();
+    if (current) return of(current);
+    if (!this.request$) {
+      this.loading.set(true);
+      this.request$ = this.api.get<MetaResponse>('/meta').pipe(
+        tap({
+          next: (meta) => {
+            this.meta.set(meta);
+            this.loading.set(false);
+          },
+          error: () => {
+            this.loading.set(false);
+            this.request$ = null;
+          },
+        }),
+        shareReplay(1),
+      );
+    }
+    return this.request$;
+  }
 
   load(force = false): void {
     if (this.started && !force) return;
     this.started = true;
-    this.loading.set(true);
-    this.api.get<MetaResponse>('/meta').subscribe({
-      next: (meta) => {
-        this.meta.set(meta);
-        this.loading.set(false);
-      },
-      error: () => this.loading.set(false),
-    });
+    if (force) this.request$ = null;
+    this.ensureLoaded().subscribe({ error: () => undefined });
   }
 
   entity(key: string): EntityDef | undefined {

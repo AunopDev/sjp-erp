@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
@@ -27,8 +27,10 @@ import type { RecordRow } from '../core/models';
         [exportName]="'purchase-orders'"
         [canExport]="auth.can('purchase','export')"
         [emptyText]="'ยังไม่มีใบสั่งซื้อ'"
+        [error]="loadError()"
         [rowClass]="rowClass"
         (rowClick)="open($event)"
+        (retry)="load()"
       />
     </div>
     @if (formOpen()) {
@@ -42,9 +44,11 @@ export class PurchaseComponent implements OnInit {
   readonly meta = inject(MetaService);
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly toast = inject(ToastService);
 
   readonly rows = signal<RecordRow[]>([]);
+  readonly loadError = signal('');
   readonly formOpen = signal(false);
   readonly fields = computed(() => this.meta.entity('purchaseOrders')?.fields ?? []);
   readonly today = todayStr();
@@ -59,12 +63,22 @@ export class PurchaseComponent implements OnInit {
   ngOnInit(): void {
     this.meta.load();
     this.load();
+    this.route.queryParamMap.subscribe((params) => {
+      if (params.get('new') !== '1' || !this.auth.can('purchase', 'create')) return;
+      this.formOpen.set(true);
+      void this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
+    });
   }
 
   load(): void {
+    this.loadError.set('');
     this.api.get<RecordRow[]>('/purchase-orders').subscribe({
       next: (rows) => this.rows.set(rows),
-      error: (error: unknown) => this.toast.error(apiErrorMessage(error)),
+      error: (error: unknown) => {
+        const message = apiErrorMessage(error);
+        this.loadError.set(message);
+        this.toast.error(message);
+      },
     });
   }
 

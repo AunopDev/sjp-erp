@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { SafeUser } from '../auth/user.types.js';
+import { WebhookDto } from './webhooks.dto.js';
 import { WebhooksService, type WebhookInput } from './webhooks.service.js';
 
 @Controller('webhooks')
@@ -13,13 +15,13 @@ export class WebhooksController {
   }
 
   @Post()
-  create(@CurrentUser() user: SafeUser, @Body() body: WebhookInput) {
-    return this.webhooks.save(user, null, body ?? {});
+  create(@CurrentUser() user: SafeUser, @Body() body: WebhookDto) {
+    return this.webhooks.save(user, null, body as WebhookInput);
   }
 
   @Put(':id')
-  update(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: WebhookInput) {
-    return this.webhooks.save(user, id, body ?? {});
+  update(@CurrentUser() user: SafeUser, @Param('id') id: string, @Body() body: WebhookDto) {
+    return this.webhooks.save(user, id, body as WebhookInput);
   }
 
   @Delete(':id')
@@ -33,6 +35,7 @@ export class WebhooksController {
   }
 
   @Post(':id/test')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   test(@CurrentUser() user: SafeUser, @Param('id') id: string) {
     return this.webhooks.test(user, id);
   }

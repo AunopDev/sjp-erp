@@ -113,11 +113,11 @@ const EMPTY_FORM: WebhookForm = { id: null, name: '', url: '', secret: '', event
     @if (formOpen()) {
       <app-modal [title]="form().id ? 'แก้ไข Webhook' : 'เพิ่ม Webhook'" (closed)="formOpen.set(false)">
         <div class="form-grid">
-          <div class="field"><label>ชื่อ *</label><input [value]="form().name" (input)="setForm('name', $any($event.target).value)" /></div>
+          <div class="field"><label for="lf-webhooks-component-1">ชื่อ *</label><input id="lf-webhooks-component-1" [value]="form().name" (input)="setForm('name', $any($event.target).value)" /></div>
           <div class="field"><label>เปิดใช้งาน</label><label class="check" style="margin-top:8px"><input type="checkbox" [checked]="form().enabled" (change)="setForm('enabled', $any($event.target).checked)" /> ส่ง event ไปยัง URL นี้</label></div>
-          <div class="field wide"><label>URL ปลายทาง *</label><input [value]="form().url" (input)="setForm('url', $any($event.target).value)" placeholder="https://example.com/hooks/sjp" /></div>
-          <div class="field wide"><label>Secret สำหรับ HMAC (เว้นว่างเพื่อใช้ค่าเดิม/ไม่ลงนาม)</label><input type="password" [value]="form().secret" (input)="setForm('secret', $any($event.target).value)" placeholder="optional" /></div>
-          <div class="field wide"><label>Event ที่ต้องการ (คั่นด้วย , หรือขึ้นบรรทัดใหม่)</label><textarea rows="3" [value]="form().events" (input)="setForm('events', $any($event.target).value)" placeholder="record.*, approval.*"></textarea></div>
+          <div class="field wide"><label for="lf-webhooks-component-2">URL ปลายทาง *</label><input id="lf-webhooks-component-2" [value]="form().url" (input)="setForm('url', $any($event.target).value)" placeholder="https://example.com/hooks/sjp" /></div>
+          <div class="field wide"><label for="lf-webhooks-component-3">Secret สำหรับ HMAC (เว้นว่างเพื่อใช้ค่าเดิม/ไม่ลงนาม)</label><input id="lf-webhooks-component-3" type="password" [value]="form().secret" (input)="setForm('secret', $any($event.target).value)" placeholder="optional" /></div>
+          <div class="field wide"><label for="lf-webhooks-component-4">Event ที่ต้องการ (คั่นด้วย , หรือขึ้นบรรทัดใหม่)</label><textarea id="lf-webhooks-component-4" rows="3" [value]="form().events" (input)="setForm('events', $any($event.target).value)" placeholder="record.*, approval.*"></textarea></div>
         </div>
         <p class="muted small">ตัวอย่าง: <code>record.created</code>, <code>record.*</code>, <code>approval.approved</code> — เว้นว่างเพื่อรับทุก event</p>
         @if (formError()) { <div class="err">{{ formError() }}</div> }

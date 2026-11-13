@@ -2,8 +2,10 @@ import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
-import { records, roles, settings, approvals } from '../db/schema.js';
-import { bad, notFound } from '../common/exceptions.js';
+import { ACTIONS, RESOURCES } from '../db/database.service.js';
+import { records, roles, settings, approvals, users } from '../db/schema.js';
+import { bad, forbidden, notFound } from '../common/exceptions.js';
+import type { SafeUser } from '../auth/user.types.js';
 import {
   DEFAULT_ENTITY_DEFS,
   DEFAULT_LISTS,
@@ -18,6 +20,7 @@ import {
   type EntityDef,
   type FieldDef,
   type ProjectStepDef,
+  findEntity,
 } from './entities.js';
 
 const SETTINGS_KEY = 'metadata';
@@ -26,6 +29,15 @@ const FIELD_TYPES = new Set([
   'ref', 'file', 'rows', 'formula', 'section', 'email', 'phone', 'url',
 ]);
 const KEY = /^[a-zA-Z][A-Za-z0-9_]*$/;
+
+/** Keys that would collide with built-in resources or JavaScript object internals. */
+const RESERVED_ENTITY_KEYS = new Set([
+  ...RESOURCES,
+  'files', 'backup', 'notify', 'webhooks', 'approvals', 'events', 'audit', 'metadata',
+  'dashboard', 'reports', 'search', 'pdf', 'auth', 'company', 'health',
+  'constructor', 'prototype', 'hasOwnProperty', 'toString', 'valueOf', 'isPrototypeOf',
+]);
+const RESERVED_FIELD_KEYS = new Set(['constructor', 'prototype', '__proto__', 'hasOwnProperty', 'toString', 'valueOf']);
 
 export interface StoredMetadata {
   entities: Record<string, EntityDef>;
@@ -65,12 +77,13 @@ export class MetadataService implements OnApplicationBootstrap {
     };
   }
 
-  saveEntity(input: EntityDef, roleIds: string[] = []): EntityDef {
+  saveEntity(input: EntityDef, roleIds?: string[]): EntityDef {
     if (!input || typeof input !== 'object') bad('ข้อมูลโมดูลไม่ถูกต้อง');
     const key = String(input.key ?? '').trim();
     if (!KEY.test(key)) bad('key ของโมดูลต้องเป็นภาษาอังกฤษ/ตัวเลข/ขีดล่าง และขึ้นต้นด้วยตัวอักษร');
     if (!String(input.label ?? '').trim()) bad('กรุณากรอกชื่อโมดูล/เอกสาร');
-    const existing = ENTITY_DEFS[key];
+    const existing = Object.prototype.hasOwnProperty.call(ENTITY_DEFS, key) ? ENTITY_DEFS[key] : undefined;
+    if (!existing && RESERVED_ENTITY_KEYS.has(key)) bad(`key "${key}" เป็นชื่อสงวนของระบบ`);
     if (!existing && WORKFLOW_ENTITY_KEY[key]) bad(`key "${key}" เป็นชื่อสงวนของ workflow ระบบ`);
     if (existing?.system) bad('ข้อมูลระบบนี้แก้ไขโครงสร้างไม่ได้');
     if (existing && !existing.custom && input.custom) bad('ไม่สามารถเปลี่ยนโมดูลระบบเป็นโมดูลที่สร้างเองได้');
@@ -115,9 +128,13 @@ export class MetadataService implements OnApplicationBootstrap {
       cols: cols.length ? cols : ['code', title],
       filters,
       fields,
-      scoped: input.scoped ?? existing?.scoped ?? false,
+      scoped: typeof input.scoped === 'boolean' ? input.scoped : existing?.scoped ?? false,
       custom: isCustom,
       system: existing?.system ?? false,
+      group: input.group !== undefined ? String(input.group).trim().slice(0, 60) : existing?.group,
+      navLabel: input.navLabel !== undefined ? String(input.navLabel).trim().slice(0, 40) : existing?.navLabel,
+      icon: input.icon !== undefined ? String(input.icon).trim().slice(0, 40) : existing?.icon,
+      description: input.description !== undefined ? String(input.description).trim().slice(0, 240) : existing?.description,
     };
     ENTITY_DEFS[key] = def;
     RESOURCE_LABELS[resource] = def.label;
@@ -126,19 +143,35 @@ export class MetadataService implements OnApplicationBootstrap {
     stored.entities[key] = JSON.parse(JSON.stringify(def));
     this.write(stored);
 
-    if (isCustom && roleIds.length) {
-      for (const roleId of roleIds) {
-        const role = this.db.select().from(roles).where(eq(roles.id, roleId)).all()[0];
-        if (!role) continue;
-        const perms = { ...role.perms, [key]: { view: true, create: true, edit: true } };
-        this.db.update(roles).set({ perms }).where(eq(roles.id, roleId)).run();
+    if (isCustom && roleIds?.length) {
+      const wanted = new Set(roleIds.map(String));
+      for (const role of this.db.select().from(roles).all()) {
+        if (role.isAdmin) continue;
+        const has = !!role.perms[key];
+        if (wanted.has(role.id)) {
+          const current = role.perms[key] ?? {};
+          const perms = {
+            ...role.perms,
+            [key]: {
+              create: existing ? current.create ?? false : true,
+              edit: existing ? current.edit ?? false : true,
+              ...current,
+              view: true,
+            },
+          };
+          this.db.update(roles).set({ perms }).where(eq(roles.id, role.id)).run();
+        } else if (has) {
+          const perms = { ...role.perms };
+          delete perms[key];
+          this.db.update(roles).set({ perms }).where(eq(roles.id, role.id)).run();
+        }
       }
     }
     return def;
   }
 
   renameField(entityKey: string, fromInput: unknown, toInput: unknown) {
-    const def = ENTITY_DEFS[entityKey];
+    const def = findEntity(entityKey);
     if (!def) notFound('ไม่พบโมดูล');
     if (def.system) bad('ข้อมูลระบบนี้แก้ไขโครงสร้างไม่ได้');
     const from = String(fromInput ?? '').trim();
@@ -146,6 +179,7 @@ export class MetadataService implements OnApplicationBootstrap {
     const field = def.fields.find((item) => item.key === from);
     if (!field) notFound(`ไม่พบฟิลด์ "${from}"`);
     if (!KEY.test(to)) bad('key ใหม่ต้องเป็นภาษาอังกฤษ/ตัวเลข/ขีดล่าง และขึ้นต้นด้วยตัวอักษร');
+    if (RESERVED_FIELD_KEYS.has(to)) bad(`key ใหม่ "${to}" เป็นชื่อสงวนของระบบ`);
     if (from === to) bad('key ใหม่ต้องต่างจาก key เดิม');
     if (def.fields.some((item) => item.key === to)) bad(`key "${to}" ถูกใช้อยู่แล้วในโมดูลนี้`);
 
@@ -216,22 +250,22 @@ export class MetadataService implements OnApplicationBootstrap {
   }
 
   deleteEntity(key: string): void {
-    const def = ENTITY_DEFS[key];
+    const def = findEntity(key);
     if (!def) notFound('ไม่พบโมดูล');
     if (!def.custom) bad('ลบได้เฉพาะโมดูลที่สร้างเอง — โมดูลระบบใช้การซ่อน/ปิดใช้งานแทน');
     const count = this.db.select().from(records).where(eq(records.entity, key)).all().filter((r) => !r.deleted).length;
     if (count) bad(`ลบโมดูลไม่ได้ เพราะมีข้อมูล ${count} รายการ`);
     delete ENTITY_DEFS[key];
-    delete RESOURCE_LABELS[key];
+    delete RESOURCE_LABELS[def.resource];
     delete (WORKFLOWS as Record<string, unknown>)[key];
     const stored = this.read();
     delete stored.entities[key];
     delete stored.workflows[key];
     this.write(stored);
     for (const role of this.db.select().from(roles).all()) {
-      if (role.perms[key]) {
+      if (role.perms[def.resource]) {
         const perms = { ...role.perms };
-        delete perms[key];
+        delete perms[def.resource];
         this.db.update(roles).set({ perms }).where(eq(roles.id, role.id)).run();
       }
     }
@@ -239,7 +273,7 @@ export class MetadataService implements OnApplicationBootstrap {
 
   saveWorkflow(key: string, workflow: unknown): unknown {
     const entityKey = WORKFLOW_ENTITY_KEY[key] ?? key;
-    const def = ENTITY_DEFS[entityKey];
+    const def = findEntity(entityKey);
     if (!def) notFound('ไม่พบโมดูล');
     if (key === 'project') return this.saveProjectWorkflow(workflow as { steps?: ProjectStepDef[] });
     const wf = workflow as { confirmed?: boolean; statuses?: Record<string, unknown>[] };
@@ -268,6 +302,7 @@ export class MetadataService implements OnApplicationBootstrap {
       for (const next of status.next) if (!keys.has(next)) bad(`สถานะ "${status.label}" ชี้ไปสถานะถัดไป "${next}" ที่ไม่มี`);
       for (const field of status.requiredFields) if (!def.fields.some((f) => f.key === field)) bad(`ฟิลด์บังคับ "${field}" ไม่มีในโมดูล`);
     }
+    this.assertApprovers(normalized);
     const old = (WORKFLOWS as Record<string, { statuses?: { key: string }[] }>)[key];
     for (const status of old?.statuses ?? []) {
       if (!keys.has(status.key) && this.statusHasData(entityKey, status.key)) bad(`ลบสถานะ "${status.key}" ไม่ได้ เพราะมีข้อมูลใช้งานอยู่`);
@@ -298,7 +333,13 @@ export class MetadataService implements OnApplicationBootstrap {
         label: String(raw.label ?? key),
         desc: String(raw.desc ?? ''),
         fields: this.normalizeFields(Array.isArray(raw.fields) ? raw.fields : [], 'project', false),
-        docs: Array.isArray(raw.docs) ? raw.docs.map((d) => ({ key: String(d.key ?? ''), label: String(d.label ?? '') })) : [],
+        docs: Array.isArray(raw.docs)
+          ? raw.docs.map((d) => {
+              const docKey = String(d.key ?? '').trim();
+              if (!KEY.test(docKey)) bad(`key เอกสาร "${docKey}" ไม่ถูกต้อง`);
+              return { key: docKey, label: String(d.label ?? docKey).slice(0, 120) };
+            })
+          : [],
         enabled: raw.enabled !== false,
         requireDocs: !!raw.requireDocs,
         approvalRequired: !!raw.approvalRequired,
@@ -311,6 +352,7 @@ export class MetadataService implements OnApplicationBootstrap {
     for (const step of old) {
       if (!keys.has(step.key) && this.projectStepUsed(step.key)) bad(`ลบขั้นตอน "${step.label}" ไม่ได้ เพราะมีข้อมูลโครงการใช้งานอยู่`);
     }
+    this.assertApprovers(normalized);
     WORKFLOWS.project = { confirmed: !!workflow['confirmed'], steps: normalized as ProjectStepDef[] };
     const stored = this.read();
     stored.workflows['project'] = JSON.parse(JSON.stringify(WORKFLOWS.project));
@@ -336,12 +378,27 @@ export class MetadataService implements OnApplicationBootstrap {
     this.apply(stored);
   }
 
-  saveRole(id: string, input: RoleInput): unknown {
+  saveRole(user: SafeUser, id: string, input: RoleInput): unknown {
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่แก้ไขบทบาทได้');
     const role = this.db.select().from(roles).where(eq(roles.id, id)).all()[0];
     if (!role) notFound('ไม่พบบทบาท');
     if (role.isAdmin && input.perms) bad('บทบาทผู้ดูแลระบบแก้ไขสิทธิ์ไม่ได้');
+    if (input.perms) {
+      const allowedResources = new Set([
+        ...RESOURCES,
+        ...Object.values(ENTITY_DEFS).map((entity) => entity.resource),
+      ]);
+      for (const [resource, actions] of Object.entries(input.perms)) {
+        if (!allowedResources.has(resource)) bad(`ไม่รู้จัก resource "${resource}"`);
+        if (!actions || typeof actions !== 'object' || Array.isArray(actions)) bad(`สิทธิ์ของ "${resource}" ไม่ถูกต้อง`);
+        for (const [action, enabled] of Object.entries(actions)) {
+          if (!(ACTIONS as readonly string[]).includes(action)) bad(`ไม่รู้จักสิทธิ์ "${action}"`);
+          if (typeof enabled !== 'boolean') bad(`ค่าสิทธิ์ "${resource}.${action}" ต้องเป็น true/false`);
+        }
+      }
+    }
     const next = {
-      name: input.name !== undefined ? String(input.name).trim() : role.name,
+      name: input.name !== undefined ? String(input.name).trim().slice(0, 120) : role.name,
       scope: input.scope ?? role.scope,
       perms: input.perms ?? role.perms,
     };
@@ -383,7 +440,10 @@ export class MetadataService implements OnApplicationBootstrap {
       if (!DEFAULT_ENTITY_DEFS[key]) delete ENTITY_DEFS[key];
     }
     for (const [key, def] of Object.entries(DEFAULT_ENTITY_DEFS)) ENTITY_DEFS[key] = JSON.parse(JSON.stringify(def));
-    for (const [key, def] of Object.entries(stored.entities)) ENTITY_DEFS[key] = JSON.parse(JSON.stringify(def));
+    for (const [key, def] of Object.entries(stored.entities)) {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      ENTITY_DEFS[key] = JSON.parse(JSON.stringify(def));
+    }
 
     for (const key of Object.keys(WORKFLOWS)) delete (WORKFLOWS as Record<string, unknown>)[key];
     Object.assign(WORKFLOWS, JSON.parse(JSON.stringify(DEFAULT_WORKFLOWS)));
@@ -397,12 +457,22 @@ export class MetadataService implements OnApplicationBootstrap {
     LISTS.depts = [...stored.lists.depts];
   }
 
+  private assertApprovers(statuses: { approverRole?: string; approverUser?: string }[]): void {
+    const roleIds = new Set(this.db.select().from(roles).all().map((role) => role.id));
+    const userIds = new Set(this.db.select().from(users).all().filter((row) => row.active).map((row) => row.id));
+    for (const status of statuses) {
+      if (status.approverRole && !roleIds.has(status.approverRole)) bad(`ไม่พบบทบาทผู้อนุมัติ "${status.approverRole}"`);
+      if (status.approverUser && !userIds.has(status.approverUser)) bad(`ไม่พบผู้ใช้อนุมัติ "${status.approverUser}"`);
+    }
+  }
+
   private normalizeFields(fields: FieldDef[], entityKey: string, requireLabel = true): FieldDef[] {
     const out: FieldDef[] = [];
     const keys = new Set<string>();
     for (const raw of fields) {
       const key = String(raw.key ?? '').trim();
       if (!KEY.test(key)) bad(`key ฟิลด์ "${key}" ไม่ถูกต้อง`);
+      if (RESERVED_FIELD_KEYS.has(key)) bad(`key ฟิลด์ "${key}" เป็นชื่อสงวนของระบบ`);
       if (keys.has(key)) bad(`key ฟิลด์ "${key}" ซ้ำ`);
       keys.add(key);
       const type = String(raw.type ?? 'text') as FieldDef['type'];
@@ -412,7 +482,7 @@ export class MetadataService implements OnApplicationBootstrap {
       const optionsFrom = raw.optionsFrom === 'teams' || raw.optionsFrom === 'depts' ? raw.optionsFrom : undefined;
       if (type === 'select' && !(raw.options ?? []).length && !optionsFrom) bad(`ฟิลด์ "${raw.label || key}" ต้องมีตัวเลือก`);
       if (type === 'ref' && !raw.ref) bad(`ฟิลด์ "${raw.label || key}" ต้องเลือกปลายทาง`);
-      if (type === 'ref' && raw.ref !== 'users' && !ENTITY_DEFS[raw.ref ?? '']) bad(`ฟิลด์ "${raw.label || key}" ชี้ไปโมดูล "${raw.ref}" ที่ไม่มี`);
+      if (type === 'ref' && raw.ref !== 'users' && !findEntity(raw.ref ?? '')) bad(`ฟิลด์ "${raw.label || key}" ชี้ไปโมดูล "${raw.ref}" ที่ไม่มี`);
       if (type === 'rows' && !(raw.cols ?? []).length) bad(`ฟิลด์ "${raw.label || key}" ต้องมีคอลัมน์`);
       out.push({
         ...raw,
@@ -421,6 +491,8 @@ export class MetadataService implements OnApplicationBootstrap {
         type,
         required: !!raw.required,
         hidden: !!raw.hidden,
+        readOnly: !!raw.readOnly,
+        sensitive: !!raw.sensitive,
         options: type === 'select' || type === 'multiselect' ? (raw.options ?? []).map(String) : undefined,
         optionsFrom,
         cols: type === 'rows' ? (raw.cols ?? []).map((c) => ({ ...c, key: String(c.key ?? ''), label: String(c.label ?? c.key ?? '') })) : undefined,

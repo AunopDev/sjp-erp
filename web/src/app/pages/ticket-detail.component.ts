@@ -9,7 +9,7 @@ import { FieldComponent } from '../shared/fields.component';
 import { IconComponent } from '../shared/icon.component';
 import { RecordFormComponent } from '../shared/record-form.component';
 import { ToastService } from '../shared/toast.service';
-import type { FieldDef, Option, RecordRow, WorkflowStatus } from '../core/models';
+import type { ApprovalRow, FieldDef, Option, RecordRow, WorkflowStatus } from '../core/models';
 
 const SLA_HOURS: Record<string, number> = { เร่งด่วน: 4, สูง: 8, ปกติ: 24, ต่ำ: 72 };
 
@@ -44,42 +44,52 @@ const SLA_HOURS: Record<string, number> = { เร่งด่วน: 4, สู�
           </div>
         }
 
+        @if (pendingApprovals().length) {
+          <div class="notice small" role="status">
+            รออนุมัติ: {{ pendingApprovals()[0].title }} · ผู้อนุมัติ {{ pendingApprovals()[0].approverUserName || pendingApprovals()[0].approverRoleName || 'ผู้ดูแลระบบ' }}
+            — ติดตามผลได้ที่เมนู “คำขออนุมัติ”
+          </div>
+        }
+
         <div class="tabs">
           <button type="button" [class.active]="tab() === 'info'" (click)="tab.set('info')">รายละเอียด</button>
-          <button type="button" [class.active]="tab() === 'timeline'" (click)="tab.set('timeline')">ไทม์ไลน์ ({{ asArray(ticket['timeline']).length }})</button>
-          <button type="button" [class.active]="tab() === 'visit'" (click)="tab.set('visit')">นัดหมาย/หน้างาน ({{ asArray(ticket['appointments']).length }})</button>
+          <button type="button" [class.active]="tab() === 'timeline'" (click)="tab.set('timeline')">ไทม์ไลน์ <span class="tab-count">{{ asArray(ticket['timeline']).length }}</span></button>
+          <button type="button" [class.active]="tab() === 'visit'" (click)="tab.set('visit')">นัดหมาย/หน้างาน <span class="tab-count">{{ asArray(ticket['appointments']).length }}</span></button>
           <button type="button" [class.active]="tab() === 'audit'" (click)="tab.set('audit')">ประวัติการแก้ไข</button>
         </div>
 
         @if (tab() === 'info') {
-          <div class="grid c2">
+          <div class="detail-layout">
             <div class="card">
               @for (field of visibleFields(); track field.key) { <div class="kv"><div class="k">{{ field.label }}</div><div class="v">{{ display(field, ticket) }}</div></div> }
             </div>
-            <div class="card no-print">
+            <div class="card no-print action-panel">
               <h3>เปลี่ยนสถานะ</h3>
               @if (!statusOptions().length) {
                 <div class="muted">ไม่มีสถานะถัดไปที่เปลี่ยนได้</div>
               } @else {
-                <div class="field"><label>เปลี่ยนเป็น</label><select [value]="statusTo()" (change)="setStatusTo($any($event.target).value)">@for (status of statusOptions(); track status.key) { <option [value]="status.key" [selected]="status.key === statusTo()">{{ status.label }}</option> }</select></div>
+                <div class="field"><label for="lf-ticket-detail-component-1">เปลี่ยนเป็น</label><select id="lf-ticket-detail-component-1" [value]="statusTo()" (change)="setStatusTo($any($event.target).value)">@for (status of statusOptions(); track status.key) { <option [value]="status.key" [selected]="status.key === statusTo()">{{ status.label }}</option> }</select></div>
                 @for (field of requiredFields(); track field.key) {
                   <app-field [field]="field" [value]="statusFields()[field.key] ?? ''" (valueChange)="setStatusField(field.key, $event)" />
                 }
-                <div class="field" style="margin-top:10px"><label>หมายเหตุ/ข้อความแจ้งผู้ใช้</label><textarea rows="3" [value]="statusComment()" (input)="statusComment.set($any($event.target).value)"></textarea></div>
-                <button type="button" class="btn primary" [disabled]="statusBusy()" (click)="changeStatus()">{{ statusBusy() ? 'กำลังบันทึก…' : 'ยืนยันเปลี่ยนสถานะ' }}</button>
+                <div class="field"><label for="lf-ticket-detail-component-2">หมายเหตุ/ข้อความแจ้งผู้ใช้</label><textarea id="lf-ticket-detail-component-2" rows="3" [value]="statusComment()" (input)="statusComment.set($any($event.target).value)"></textarea></div>
+                <button type="button" class="btn primary block" [disabled]="statusBusy()" (click)="changeStatus()">{{ statusBusy() ? 'กำลังบันทึก…' : 'ยืนยันเปลี่ยนสถานะ' }}</button>
               }
 
-              <h3 style="margin-top:18px">มอบหมาย/ส่งต่อ</h3>
+              <h3>มอบหมาย/ส่งต่อ</h3>
               <div class="form-grid">
-                <div class="field"><label>ทีม</label><select [value]="assignTeam()" (change)="assignTeam.set($any($event.target).value)"><option value="" [selected]="!assignTeam()">–</option>@for (team of lists().teams; track team) { <option [value]="team" [selected]="team === assignTeam()">{{ team }}</option> }</select></div>
-                <div class="field"><label>ผู้รับผิดชอบ</label><select [value]="assignee()" (change)="assignee.set($any($event.target).value)"><option value="" [selected]="!assignee()">–</option>@for (user of users(); track user.value) { <option [value]="user.value" [selected]="user.value === assignee()">{{ user.label }}</option> }</select></div>
-                <div class="field wide"><label>หมายเหตุ</label><input [value]="assignNote()" (input)="assignNote.set($any($event.target).value)" /></div>
+                <div class="field"><label for="lf-ticket-detail-component-3">ทีม</label><select id="lf-ticket-detail-component-3" [value]="assignTeam()" (change)="assignTeam.set($any($event.target).value)"><option value="" [selected]="!assignTeam()">–</option>@for (team of lists().teams; track team) { <option [value]="team" [selected]="team === assignTeam()">{{ team }}</option> }</select></div>
+                <div class="field"><label for="lf-ticket-detail-component-4">ผู้รับผิดชอบ</label><select id="lf-ticket-detail-component-4" [value]="assignee()" (change)="assignee.set($any($event.target).value)"><option value="" [selected]="!assignee()">–</option>@for (user of users(); track user.value) { <option [value]="user.value" [selected]="user.value === assignee()">{{ user.label }}</option> }</select></div>
+                <div class="field wide"><label for="lf-ticket-detail-component-5">หมายเหตุ</label><input id="lf-ticket-detail-component-5" [value]="assignNote()" (input)="assignNote.set($any($event.target).value)" /></div>
               </div>
-              <button type="button" class="btn" [disabled]="assignBusy()" (click)="assign()">บันทึกการมอบหมาย</button>
+              <button type="button" class="btn block" [disabled]="assignBusy()" (click)="assign()">บันทึกการมอบหมาย</button>
 
-              <h3 style="margin-top:18px">เพิ่มบันทึก</h3>
-              <textarea rows="3" [value]="noteText()" (input)="noteText.set($any($event.target).value)" placeholder="ข้อความ เช่น แจ้งผลให้ผู้ใช้ ปัญหาที่ยังติดขัด"></textarea>
-              <div class="row" style="margin-top:6px"><button type="button" class="btn" [disabled]="noteBusy()" (click)="addNote('note')">เพิ่มบันทึก</button><button type="button" class="btn" [disabled]="noteBusy()" (click)="addNote('remote')">บันทึกแก้ไขระยะไกล</button></div>
+              <h3>เพิ่มบันทึก</h3>
+              <div class="field"><label for="lf-ticket-detail-component-6">รายละเอียด/บันทึก</label><textarea id="lf-ticket-detail-component-6" rows="3" [value]="noteText()" (input)="noteText.set($any($event.target).value)" placeholder="ข้อความ เช่น แจ้งผลให้ผู้ใช้ ปัญหาที่ยังติดขัด"></textarea></div>
+              <div class="action-row">
+                <button type="button" class="btn" [disabled]="noteBusy()" (click)="addNote('note')">เพิ่มบันทึก</button>
+                <button type="button" class="btn" [disabled]="noteBusy()" (click)="addNote('remote')">บันทึกแก้ไขระยะไกล</button>
+              </div>
             </div>
           </div>
         }
@@ -101,19 +111,21 @@ const SLA_HOURS: Record<string, number> = { เร่งด่วน: 4, สู�
           <div class="card">
             <h3>นัดหมายเข้าหน้างาน</h3>
             @if (asArray(ticket['appointments']).length) {
-              <table class="mini"><thead><tr><th>วันที่</th><th>เวลา</th><th>ช่าง</th><th>สถานะ</th><th>ผล</th><th></th></tr></thead>
+              <table class="mini"><thead><tr><th scope="col">วันที่</th><th scope="col">เวลา</th><th scope="col">ช่าง</th><th scope="col">สถานะ</th><th scope="col">ผล</th><th scope="col"></th></tr></thead>
                 <tbody>@for (appt of asArray(ticket['appointments']); track appt['id']) {
                   <tr><td>{{ fmtDate(appt['date']) }}</td><td>{{ appt['time'] }}</td><td>{{ userName(appt['tech']) }}</td><td><span class="badge gray">{{ appt['status'] }}</span></td><td>{{ appt['result'] || appt['note'] }}</td><td>@if (appt['status'] === 'นัดหมาย') { <button type="button" class="btn sm" (click)="resolveAppointment(appt)">บันทึกผล</button> }</td></tr>
                 }</tbody>
               </table>
             } @else { <div class="muted">ยังไม่มีนัดหมาย</div> }
             <div class="form-grid" style="margin-top:14px">
-              <div class="field"><label>วันที่</label><input type="date" [value]="appt().date" (input)="setAppt('date', $any($event.target).value)" /></div>
-              <div class="field"><label>เวลา</label><input type="time" [value]="appt().time" (input)="setAppt('time', $any($event.target).value)" /></div>
-              <div class="field"><label>ช่าง</label><select [value]="appt().tech" (change)="setAppt('tech', $any($event.target).value)"><option value="" [selected]="!appt().tech">–</option>@for (user of users(); track user.value) { <option [value]="user.value" [selected]="user.value === appt().tech">{{ user.label }}</option> }</select></div>
-              <div class="field wide"><label>รายละเอียด</label><input [value]="appt().note" (input)="setAppt('note', $any($event.target).value)" /></div>
+              <div class="field"><label for="lf-ticket-detail-component-7">วันที่</label><input id="lf-ticket-detail-component-7" type="date" [value]="appt().date" (input)="setAppt('date', $any($event.target).value)" /></div>
+              <div class="field"><label for="lf-ticket-detail-component-8">เวลา</label><input id="lf-ticket-detail-component-8" type="time" [value]="appt().time" (input)="setAppt('time', $any($event.target).value)" /></div>
+              <div class="field"><label for="lf-ticket-detail-component-9">ช่าง</label><select id="lf-ticket-detail-component-9" [value]="appt().tech" (change)="setAppt('tech', $any($event.target).value)"><option value="" [selected]="!appt().tech">–</option>@for (user of users(); track user.value) { <option [value]="user.value" [selected]="user.value === appt().tech">{{ user.label }}</option> }</select></div>
+              <div class="field wide"><label for="lf-ticket-detail-component-10">รายละเอียด</label><input id="lf-ticket-detail-component-10" [value]="appt().note" (input)="setAppt('note', $any($event.target).value)" /></div>
             </div>
-            <button type="button" class="btn primary" [disabled]="apptBusy()" (click)="addAppointment()">+ เพิ่มนัดหมาย</button>
+            <div class="form-actions">
+              <button type="button" class="btn primary" [disabled]="apptBusy()" (click)="addAppointment()">+ เพิ่มนัดหมาย</button>
+            </div>
           </div>
         }
 
@@ -151,6 +163,7 @@ export class TicketDetailComponent implements OnInit {
   readonly statusComment = signal('');
   readonly statusFields = signal<Record<string, unknown>>({});
   readonly statusBusy = signal(false);
+  readonly pendingApprovals = signal<ApprovalRow[]>([]);
   readonly assignTeam = signal('');
   readonly assignee = signal('');
   readonly assignNote = signal('');
@@ -237,6 +250,7 @@ export class TicketDetailComponent implements OnInit {
         this.statusTo.set(this.statusOptions()[0]?.key ?? '');
         this.assignTeam.set(String(ticket['team'] ?? ''));
         this.assignee.set(String(ticket['assignee'] ?? ''));
+        this.api.get<ApprovalRow[]>(`/records/tickets/${id}/approvals`).subscribe({ next: (rows) => this.pendingApprovals.set(rows), error: () => this.pendingApprovals.set([]) });
         this.api.get<Record<string, unknown>[]>(`/audit/records/tickets/${id}`).subscribe({ next: (audit) => this.audit.set(audit), error: () => this.audit.set([]) });
       },
       error: (error: unknown) => {
@@ -260,10 +274,11 @@ export class TicketDetailComponent implements OnInit {
     if (!ticket || this.statusBusy()) return;
     this.statusBusy.set(true);
     this.api.post(`/tickets/${ticket.id}/status`, { to: this.statusTo(), comment: this.statusComment(), fields: this.statusFields() }).subscribe({
-      next: () => {
+      next: (result) => {
         this.statusBusy.set(false);
         this.statusComment.set('');
-        this.toast.show('เปลี่ยนสถานะแล้ว');
+        const pending = !!(result as Record<string, unknown>)?.['_pendingApproval'];
+        this.toast.show(pending ? 'ส่งคำขออนุมัติแล้ว — รอผู้อนุมัติ' : 'เปลี่ยนสถานะแล้ว');
         this.load();
       },
       error: (error: unknown) => {

@@ -1,5 +1,7 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable } from '@nestjs/common';
+import { compare } from 'bcryptjs';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
 import { approvals, audit, counters, events, records, roles, settings, users, webhookDeliveries, webhooks } from '../db/schema.js';
@@ -7,7 +9,7 @@ import type { SafeUser } from '../auth/user.types.js';
 import { AccessService } from '../common/access.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { nowIso } from '../common/dates.js';
-import { bad } from '../common/exceptions.js';
+import { bad, forbidden } from '../common/exceptions.js';
 import { FilesService } from '../files/files.service.js';
 import { ENTITY_DEFS } from '../meta/entities.js';
 import { MetadataService } from '../meta/metadata.service.js';
@@ -16,6 +18,7 @@ interface BackupPayload {
   app: string;
   version: number;
   exportedAt: string;
+  secretsRedacted?: boolean;
   users: unknown[];
   roles: unknown[];
   records: unknown[];
@@ -29,6 +32,15 @@ interface BackupPayload {
   webhookDeliveries?: unknown[];
 }
 
+export interface EncryptedBackup {
+  app: 'sjp-erp';
+  version: 1;
+  encrypted: true;
+  iv: string;
+  tag: string;
+  data: string;
+}
+
 @Injectable()
 export class BackupService {
   constructor(
@@ -39,29 +51,76 @@ export class BackupService {
     private readonly files: FilesService,
   ) {}
 
-  exportAll(user: SafeUser) {
-    this.access.require(user, 'settings', 'edit');
+  private backupKey(): Buffer {
+    const secret = process.env.BACKUP_ENCRYPTION_KEY || process.env.JWT_SECRET || 'sjp-erp-development-backup-key';
+    return createHash('sha256').update(secret).digest();
+  }
+
+  private encryptPayload(payload: BackupPayload): EncryptedBackup {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.backupKey(), iv);
+    const data = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
     return {
       app: 'sjp-erp',
       version: 1,
+      encrypted: true,
+      iv: iv.toString('base64'),
+      tag: cipher.getAuthTag().toString('base64'),
+      data: data.toString('base64'),
+    };
+  }
+
+  private decryptPayload(input: EncryptedBackup): BackupPayload {
+    try {
+      const decipher = createDecipheriv('aes-256-gcm', this.backupKey(), Buffer.from(input.iv, 'base64'));
+      decipher.setAuthTag(Buffer.from(input.tag, 'base64'));
+      const plain = Buffer.concat([decipher.update(Buffer.from(input.data, 'base64')), decipher.final()]).toString('utf8');
+      return JSON.parse(plain) as BackupPayload;
+    } catch {
+      bad('ถอดรหัสไฟล์สำรองไม่สำเร็จ — ตรวจสอบ BACKUP_ENCRYPTION_KEY');
+    }
+  }
+
+  private async assertCurrentPassword(user: SafeUser, password: string): Promise<void> {
+    const row = this.db.select().from(users).where(eq(users.id, user.id)).all()[0];
+    if (!row || !(await compare(String(password ?? ''), row.passwordHash))) bad('รหัสผ่านยืนยันไม่ถูกต้อง');
+  }
+
+  async exportAll(user: SafeUser, password: string) {
+    this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่สำรองข้อมูลได้');
+    await this.assertCurrentPassword(user, password);
+    const settingsRows = this.db.select().from(settings).all().map((row) => {
+      if (row.key !== 'notify' || !row.value || typeof row.value !== 'object' || Array.isArray(row.value)) return row;
+      return { ...row, value: { ...(row.value as Record<string, unknown>), smtpPass: '', lineToken: '' } };
+    });
+    const payload = {
+      app: 'sjp-erp',
+      version: 1,
       exportedAt: nowIso(),
+      secretsRedacted: true,
       users: this.db.select().from(users).all(),
       roles: this.db.select().from(roles).all(),
       records: this.db.select().from(records).all(),
       counters: this.db.select().from(counters).all(),
       audit: this.db.select().from(audit).all(),
-      settings: this.db.select().from(settings).all(),
+      settings: settingsRows,
       approvals: this.db.select().from(approvals).all(),
       events: this.db.select().from(events).all(),
       files: this.files.exportAll(),
-      webhooks: this.db.select().from(webhooks).all(),
+      webhooks: this.db.select().from(webhooks).all().map((row) => ({ ...row, secret: '' })),
       webhookDeliveries: this.db.select().from(webhookDeliveries).all(),
     } satisfies BackupPayload;
+    return this.encryptPayload(payload);
   }
 
-  restore(user: SafeUser, payload: BackupPayload | undefined, confirm: string) {
+  async restore(user: SafeUser, input: unknown, confirm: string, password: string) {
     this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่กู้คืนข้อมูลได้');
+    await this.assertCurrentPassword(user, password);
     if (confirm !== 'RESTORE') bad('ต้องพิมพ์ RESTORE เพื่อยืนยันการกู้คืนข้อมูล');
+    const encrypted = input as Partial<EncryptedBackup> | null;
+    const payload = encrypted && encrypted.encrypted === true ? this.decryptPayload(encrypted as EncryptedBackup) : (input as BackupPayload | undefined);
     if (!payload || payload.app !== 'sjp-erp' || !Array.isArray(payload.users) || !payload.users.length) {
       bad('ไฟล์สำรองไม่ถูกต้องหรือไม่มีข้อมูลผู้ใช้');
     }
@@ -69,6 +128,7 @@ export class BackupService {
     for (const key of tables) {
       if (!Array.isArray(payload[key])) bad(`ไฟล์สำรองขาดส่วน ${key}`);
     }
+    this.assertBackupRows(payload);
     const adminRoles = new Set(
       (payload.roles as { id?: unknown; isAdmin?: unknown }[])
         .filter((role) => role?.isAdmin === true)
@@ -86,7 +146,6 @@ export class BackupService {
       tx.delete(webhooks).run();
       tx.delete(records).run();
       tx.delete(counters).run();
-      tx.delete(audit).run();
       tx.delete(settings).run();
       tx.delete(users).run();
       tx.delete(roles).run();
@@ -106,11 +165,11 @@ export class BackupService {
       if (Array.isArray(payload.webhookDeliveries) && payload.webhookDeliveries.length) {
         tx.insert(webhookDeliveries).values(payload.webhookDeliveries as (typeof webhookDeliveries.$inferInsert)[]).run();
       }
-      if (payload.audit.length) tx.insert(audit).values(payload.audit as (typeof audit.$inferInsert)[]).run();
     });
 
     const restoredFiles = Array.isArray(payload.files) ? this.files.restoreAll(payload.files) : 0;
     this.metadata.reload();
+    this.bumpAllSessionVersions();
     this.audit.log(user, { action: 'restore', entity: 'settings', summary: 'กู้คืนข้อมูลจากไฟล์สำรอง' });
     return {
       ok: true,
@@ -121,11 +180,48 @@ export class BackupService {
       events: payload.events?.length ?? 0,
       files: restoredFiles,
       webhooks: payload.webhooks?.length ?? 0,
+      audit: 0,
     };
+  }
+
+  private bumpAllSessionVersions(): void {
+    const existing = this.db.select().from(settings).where(eq(settings.key, 'session_versions')).all()[0];
+    const versions =
+      existing?.value && typeof existing.value === 'object' && !Array.isArray(existing.value)
+        ? { ...(existing.value as Record<string, number>) }
+        : {};
+    for (const user of this.db.select().from(users).all()) {
+      versions[user.id] = Number(versions[user.id] ?? 0) + 1;
+    }
+    if (existing) this.db.update(settings).set({ value: versions }).where(eq(settings.key, 'session_versions')).run();
+    else this.db.insert(settings).values({ key: 'session_versions', value: versions }).run();
+  }
+
+  private assertBackupRows(payload: BackupPayload): void {
+    const isObject = (value: unknown): value is Record<string, unknown> =>
+      !!value && typeof value === 'object' && !Array.isArray(value);
+    const needs = (value: unknown, keys: string[], label: string): void => {
+      if (!isObject(value)) bad(`ข้อมูล ${label} ในไฟล์สำรองไม่ถูกต้อง`);
+      for (const key of keys) {
+        if (typeof value[key] !== 'string' || !String(value[key]).trim()) bad(`ข้อมูล ${label} ขาดฟิลด์ ${key}`);
+      }
+    };
+    for (const row of payload.users as unknown[]) needs(row, ['id', 'username', 'name', 'passwordHash', 'roleId'], 'ผู้ใช้');
+    for (const row of payload.roles as unknown[]) {
+      needs(row, ['id', 'name'], 'บทบาท');
+      if (!isObject((row as Record<string, unknown>)['perms'])) bad('ข้อมูลบทบาทขาดสิทธิ์ (perms)');
+    }
+    for (const row of payload.records as unknown[]) {
+      needs(row, ['id', 'entity', 'code'], 'รายการ');
+      if (!isObject((row as Record<string, unknown>)['data'])) bad('ข้อมูลรายการขาด data');
+    }
+    for (const row of payload.settings as unknown[]) needs(row, ['key'], 'ตั้งค่า');
+    for (const row of payload.approvals as unknown[]) needs(row, ['id', 'entity', 'recordId', 'kind', 'key'], 'คำขออนุมัติ');
   }
 
   legacyImport(user: SafeUser, state: unknown, confirm: string) {
     this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่นำเข้าข้อมูลได้');
     if (confirm !== 'IMPORT') bad('ต้องพิมพ์ IMPORT เพื่อยืนยันการนำเข้าข้อมูล');
     if (!state || typeof state !== 'object') bad('ข้อมูลจาก React เดิมไม่ถูกต้อง');
     const root = state as Record<string, unknown>;
@@ -146,12 +242,15 @@ export class BackupService {
         const rows: (typeof records.$inferInsert)[] = [];
         const codes: string[] = [];
         for (const item of value) {
-          if (!item || typeof item !== 'object') continue;
+          if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
           const raw = item as Record<string, unknown>;
-          const id = String(raw['id'] ?? crypto.randomUUID());
-          const code = String(raw['code'] ?? '').trim() || `IMP-${id.slice(0, 8)}`;
+          const id = String(raw['id'] ?? crypto.randomUUID()).trim();
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) continue;
+          const code = (String(raw['code'] ?? '').trim() || `IMP-${id.slice(0, 8)}`).slice(0, 64);
           const recordData = Object.fromEntries(
-            Object.entries(raw).filter(([key]) => key !== 'id' && key !== 'code' && !key.startsWith('_')),
+            Object.entries(raw).filter(
+              ([key]) => key !== 'id' && key !== 'code' && !key.startsWith('_') && /^[A-Za-z][A-Za-z0-9_]*$/.test(key),
+            ),
           );
           rows.push({
             id,

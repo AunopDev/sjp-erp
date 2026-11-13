@@ -29,7 +29,7 @@ interface PmResult {
           <h3>ผลการตรวจ</h3>
           @if (!results().length) { <div class="state empty">แม่แบบนี้ไม่มีรายการตรวจ</div> }
           @else {
-            <div class="table-wrap"><table class="mini"><thead><tr><th>รายการ</th><th>ผล</th><th>รายละเอียด/สิ่งผิดปกติ</th><th>วิธีแก้/งานติดตาม</th></tr></thead>
+            <div class="table-wrap"><table class="mini"><thead><tr><th scope="col">รายการ</th><th scope="col">ผล</th><th scope="col">รายละเอียด/สิ่งผิดปกติ</th><th scope="col">วิธีแก้/งานติดตาม</th></tr></thead>
               <tbody>@for (row of results(); track $index; let i = $index) {
                 <tr><td>{{ row.label }}</td>
                   <td><select [disabled]="locked()" [value]="row.result" (change)="set(i, 'result', $any($event.target).value)"><option value="" [selected]="!row.result">–</option><option value="ปกติ" [selected]="row.result === 'ปกติ'">ปกติ</option><option value="ผิดปกติ" [selected]="row.result === 'ผิดปกติ'">ผิดปกติ</option><option value="ไม่เกี่ยวข้อง" [selected]="row.result === 'ไม่เกี่ยวข้อง'">ไม่เกี่ยวข้อง</option></select></td>
@@ -39,8 +39,8 @@ interface PmResult {
               }</tbody>
             </table></div>
           }
-          <div class="field" style="margin-top:10px"><label>สรุปผล</label><textarea rows="3" [disabled]="locked()" [value]="summary()" (input)="summary.set($any($event.target).value)"></textarea></div>
-          @if (!locked()) { <div class="row" style="margin-top:10px"><button type="button" class="btn" [disabled]="busy()" (click)="save(false)">บันทึกร่าง</button><button type="button" class="btn primary" [disabled]="busy()" (click)="save(true)">ปิดงาน PM</button></div> }
+          <div class="field" style="margin-top:10px"><label for="lf-pm-record-component-1">สรุปผล</label><textarea id="lf-pm-record-component-1" rows="3" [disabled]="locked()" [value]="summary()" (input)="summary.set($any($event.target).value)"></textarea></div>
+          @if (!locked()) { <div class="form-actions"><button type="button" class="btn" [disabled]="busy()" (click)="save(false)">บันทึกร่าง</button><button type="button" class="btn primary" [disabled]="busy()" (click)="save(true)">ปิดงาน PM</button></div> }
         </div>
         <div class="card"><h3>ประวัติ</h3>
           @if (!audit().length) { <div class="muted">–</div> } @else { @for (entry of audit(); track entry['id']) { <div class="tl-item"><div class="tl-dot"></div><div><b>{{ entry['summary'] }}</b><div class="muted small">{{ entry['userName'] }} · {{ fmtDateTime(entry['at']) }}</div></div></div> } }

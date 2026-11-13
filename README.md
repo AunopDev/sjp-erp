@@ -34,7 +34,9 @@ npm run dev:web
 - **production ต้องตั้ง `JWT_SECRET` ยาว ≥ 32 ตัวอักษร** — ถ้าไม่มี/เป็น placeholder เซิร์ฟเวอร์จะไม่ start; โหมด dev จะสร้าง secret ชั่วคราวและ session จะหลุดเมื่อ restart
 - Login/Setup ถูกจำกัด 5 ครั้ง/นาที (Throttler) และสิทธิ์จัดการผู้ใช้/บทบาทแยกจาก `settings` แล้ว (`users.*`, `roles.*`)
 - Webhook ภายนอกบล็อก localhost/private IP โดยค่าเริ่มต้น — ตั้ง `WEBHOOK_ALLOW_PRIVATE=true` เฉพาะกรณีเชื่อมระบบภายในที่เชื่อถือได้
-- ไฟล์สำรองมีข้อมูลอ่อนไหว (password hash, SMTP/LINE token, HMAC secret) ต้องเก็บและส่งอย่างปลอดภัย
+- ไฟล์สำรองถูกเข้ารหัส AES-256-GCM และ redact SMTP/LINE/webhook secret — ต้องเก็บ `BACKUP_ENCRYPTION_KEY` (หรือ `JWT_SECRET`) ให้ปลอดภัย เพราะใช้ถอดรหัสไฟล์สำรอง
+- Login ใช้ HttpOnly cookie + CSRF token; ตั้ง `COOKIE_SAME_SITE`/`COOKIE_SECURE` ให้เหมาะกับโดเมนที่ deploy — ถ้า frontend/API ต่างโดเมนให้ใช้ `COOKIE_SAME_SITE=none` พร้อม HTTPS
+- CSP ของ frontend ถูกใส่ใน `web/src/index.production.html` และตัวอย่าง reverse proxy อยู่ที่ `deploy/nginx/sjp-erp.conf`; ตรวจด้วย `npm run csp:check` ใน `web/`
 - อีเมล/LINE ตั้งค่าได้ที่ Settings → แจ้งเตือน หรือใช้ env สำรอง: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`, `MAIL_TO`, `LINE_CHANNEL_TOKEN`, `LINE_TO`
 
 ## Project Guardian (ตรวจสุขภาพโปรเจ็ค)
@@ -48,6 +50,13 @@ npm run dev:web
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-health-task.ps1 -Time 08:00
   ```
   ยกเลิกด้วย `-Remove` — ตัว scheduled task รันสคริปต์ health check ส่วนการวิเคราะห์เชิงลึกใช้ agent ตอนเรียก `/check-project`
+
+## Skills & architecture
+
+- ชุดสกิล UI/UX ที่ vendor ไว้ในโปรเจ็ค: `.opencode/skills/` — ดูวิธีใช้/อัปเดตที่ `.opencode/SKILLS.md`
+- Sync จาก upstream แบบ pin commit: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sync-opencode-skills.ps1`
+- Interactive architecture diagram: `docs/architecture/architecture.html` (คำอธิบาย: `docs/architecture/architecture.md`)
+- UI/UX + accessibility audit รอบล่าสุด: `docs/ui-ux-skill-audit-2026-11-13.md`
 
 ## สถานะ migration
 
@@ -63,8 +72,15 @@ npm run dev:web
 - [x] หน้าคำขออนุมัติ + แจ้งเตือนคำขอค้างในหน้าเอกสารและ Dashboard
 - [x] ไฟล์แนบจริง: upload/download พร้อมmetadata และปุ่มพิมพ์/Save as PDF สำหรับเอกสารหลัก
 - [x] Backup/Restore ข้อมูล JSON และนำเข้าข้อมูลเอกสารจาก React เดิม
-- [x] Sidebar ย่อ/ขยายได้, Quick search ด้วย Ctrl K, Dashboard ใหม่
-- [x] ปฏิทินงานรวมนัดหมาย Ticket, งาน PM, ขั้นตอนโครงการ และกำหนดส่งใบสั่งซื้อ
+- [x] Enterprise UI v3: neutral operations console, sidebar 248px/rail 60px, topbar 56px, dense tables/forms, KPI strip + card-less dashboard, light/dark — อ้างอิง Stripe, Salesforce SLDS, SAP Fiori, NetSuite Redwood, Linear, Odoo 18 (ดู `DESIGN.md`)
+- [x] Settings แบบ 3 หมวด/10 หน้า (vertical sub-nav), density toggle (กระชับ/สบาย), saved views + ตัวเลือกคอลัมน์ในตารางพร้อมจำค่าต่อตาราง, ลากจัดลำดับ favorites
+- [x] Role-aware dashboard/nav, Role Editor แบบ grouped/preset/search + card view บนมือถือ, Module Builder แบบ workbench (module list + tabs + field list/modal), template, group/icon/nav label/description, role access, duplicate/import/export JSON, field advanced options
+- [x] Responsive audit 320–1920px: แก้ text truncation/overflow/wrapping ทั้งโปรเจ็ค, quick label/nav label สั้น, ตารางกว้างเลื่อนแนวนอน, ปุ่ม/ฟอร์ม heights สม่ำเสมอ
+- [x] Sidebar แบบ accordion 6 หมวด เปิดได้ทีละหมวด + ปักหมุด (แสดงเมื่อ hover) + ค้นหาเมนู + ย่อเป็น icon rail พร้อม flyout + drawer บนมือถือ, Quick search ด้วย Ctrl K, Dashboard ใหม่
+- [x] โต๊ะทำงาน (Workspace): ลาก/ขยาย/ซ่อนการ์ดงานได้อิสระ บันทึกเลย์เอาต์ต่อผู้ใช้ (z-order, ตำแหน่ง, ความกว้าง), จัดเรียงอัตโนมัติ/รีเซ็ต, รองรับคีย์บอร์ด และเรียงเป็นคอลัมน์บนมือถือ
+- [x] Quick Create ตามบริบทของหน้า (แจ้งซ่อม/ใบสั่งซื้อ/ใบแจ้งหนี้/รับชำระ/ค่าใช้จ่าย/โครงการ/จองรถ) และเปิดฟอร์มด้วย `?new=1`
+- [x] ปฏิทินงานรวมนัดหมาย Ticket, งาน PM, ขั้นตอนโครงการ, กำหนดส่งใบสั่งซื้อ และจองรถบริษัท
+- [x] ระบบจองรถบริษัท: หารถว่างตามช่วงเวลา/จำนวนที่นั่ง, การ์ดจองด่วน, ตารางว่างรายชั่วโมงแบบแท็บ, ตรวจช่วงเวลาทับซ้อน, อนุมัติ/ไม่อนุมัติ + แจ้งเตือน, แถบสัปดาห์, ค้นหา/กรอง/เฉพาะของฉัน, ส่งออก CSV, สถานะกำลังใช้งาน/เลยเวลาคืน และเชื่อมปฏิทิน
 - [x] SLA บน Ticket (4/8/24/72 ชม. ตามความเร่งด่วน) + แจ้งเตือนเกินกำหนดผ่านกระดิ่ง
 - [x] Module Builder: ลากจัดลำดับฟิลด์, ปุ่ม ↑/↓ และเปลี่ยน key ฟิลด์อย่างปลอดภัยพร้อมย้ายข้อมูลเดิม
 - [x] Platform event bus: บันทึกเหตุการณ์ record/approval และฟีดเหตุการณ์ใน Settings

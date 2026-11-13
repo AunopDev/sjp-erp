@@ -11,20 +11,45 @@ import type { FieldDef, RecordRow } from '../core/models';
   standalone: true,
   imports: [ModalComponent, DynamicFieldsComponent],
   template: `
-    <app-modal [title]="title || (record ? 'แก้ไข' : 'เพิ่ม') + ' ' + entityLabel" [wide]="true" (closed)="closed.emit()">
-      @if (message) { <div class="notice bad" role="alert">{{ message }}</div> }
-      <app-fields
-        [fields]="fields"
-        [values]="values"
-        [errors]="errors"
-        [lists]="lists"
-        (valuesChange)="values = $event"
-      />
-      <div modal-footer>
-        <button type="button" class="btn" (click)="closed.emit()">ยกเลิก</button>
-        <button type="button" class="btn primary" [disabled]="saving" (click)="save()">{{ saving ? 'กำลังบันทึก…' : 'บันทึก' }}</button>
+    @if (inline) {
+      <div class="card record-form-page">
+        @if (errorCount()) {
+          <div class="notice bad" role="alert">มี {{ errorCount() }} ช่องที่ต้องแก้ไข — ตรวจสอบข้อความใต้ช่องนั้น</div>
+        } @else if (message) {
+          <div class="notice bad" role="alert">{{ message }}</div>
+        }
+        <app-fields
+          [fields]="fields"
+          [values]="values"
+          [errors]="errors"
+          [lists]="lists"
+          (valuesChange)="values = $event"
+        />
+        <div class="record-form-actions">
+          <button type="button" class="btn" (click)="closed.emit()">ยกเลิก</button>
+          <button type="button" class="btn primary" [disabled]="saving" (click)="save()">{{ saving ? 'กำลังบันทึก…' : 'บันทึก' }}</button>
+        </div>
       </div>
-    </app-modal>
+    } @else {
+      <app-modal [title]="title || (record ? 'แก้ไข' : 'เพิ่ม') + ' ' + entityLabel" [wide]="true" (closed)="closed.emit()">
+        @if (errorCount()) {
+          <div class="notice bad" role="alert">มี {{ errorCount() }} ช่องที่ต้องแก้ไข — ตรวจสอบข้อความใต้ช่องนั้น</div>
+        } @else if (message) {
+          <div class="notice bad" role="alert">{{ message }}</div>
+        }
+        <app-fields
+          [fields]="fields"
+          [values]="values"
+          [errors]="errors"
+          [lists]="lists"
+          (valuesChange)="values = $event"
+        />
+        <div modal-footer>
+          <button type="button" class="btn" (click)="closed.emit()">ยกเลิก</button>
+          <button type="button" class="btn primary" [disabled]="saving" (click)="save()">{{ saving ? 'กำลังบันทึก…' : 'บันทึก' }}</button>
+        </div>
+      </app-modal>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -35,6 +60,7 @@ export class RecordFormComponent implements OnChanges {
   @Input() record: RecordRow | null = null;
   @Input() title = '';
   @Input() defaults: Record<string, unknown> = {};
+  @Input() inline = false;
   @Input() lists: { teams: string[]; depts: string[] } = { teams: [], depts: [] };
   @Input() createUrl = '';
   @Input() updateUrl = '';
@@ -61,6 +87,10 @@ export class RecordFormComponent implements OnChanges {
     }
   }
 
+  errorCount(): number {
+    return Object.keys(this.errors).length;
+  }
+
   save(): void {
     if (this.saving) return;
     this.saving = true;
@@ -81,10 +111,14 @@ export class RecordFormComponent implements OnChanges {
       },
       error: (error: unknown) => {
         this.saving = false;
-        this.message = apiErrorMessage(error);
         this.errors = apiFieldErrors(error);
-        if (!Object.keys(this.errors).length) this.toast.error(this.message);
+        this.message = this.errorCount() ? '' : apiErrorMessage(error);
+        if (!this.errorCount()) this.toast.error(this.message);
         this.cdr.markForCheck();
+        const first = Object.keys(this.errors)[0];
+        if (first) {
+          setTimeout(() => document.getElementById('f-' + first)?.focus());
+        }
       },
     });
   }

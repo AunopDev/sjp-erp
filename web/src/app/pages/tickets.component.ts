@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+﻿import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
@@ -16,7 +16,7 @@ import type { ListResponse, RecordRow, WorkflowStatus } from '../core/models';
   template: `
     <div class="page">
       <div class="page-head">
-        <div><h1>Service Ticket</h1><div class="muted">รับแจ้งเหตุ ซ่อม และบำรุงรักษา</div></div>
+        <div><h1>แจ้งซ่อม</h1><div class="muted">รับแจ้งเหตุ ซ่อม และบำรุงรักษา</div></div>
         <div class="page-actions">
           @if (auth.can('tickets', 'create')) { <button type="button" class="btn primary" (click)="create()">+ เปิดเคสใหม่</button> }
         </div>
@@ -30,9 +30,11 @@ import type { ListResponse, RecordRow, WorkflowStatus } from '../core/models';
         [exportName]="'tickets'"
         [canExport]="auth.can('tickets', 'export')"
         [searchPlaceholder]="'ค้นหาเลขที่ หัวข้อ อาการ จุดติดตั้ง วงจร…'"
-        [emptyText]="'ยังไม่มี Service Ticket'"
+        [emptyText]="'ยังไม่มีเคสแจ้งซ่อม'"
+        [error]="loadError()"
         [rowClass]="rowClass"
         (rowClick)="open($event)"
+        (retry)="load()"
       />
     </div>
   `,
@@ -46,6 +48,7 @@ export class TicketsComponent implements OnInit {
   readonly meta = inject(MetaService);
 
   readonly rows = signal<RecordRow[]>([]);
+  readonly loadError = signal('');
   readonly statuses = computed<WorkflowStatus[]>(() => this.meta.ticketWorkflow());
   readonly fmtDuration = fmtDuration;
   readonly rowClass = (row: Record<string, unknown>) => {
@@ -59,9 +62,14 @@ export class TicketsComponent implements OnInit {
   }
 
   load(): void {
+    this.loadError.set('');
     this.api.get<ListResponse<RecordRow>>('/records/tickets', { pageSize: 500, sort: '-_createdAt' }).subscribe({
       next: (result) => this.rows.set(result.items),
-      error: (error: unknown) => this.toast.error(apiErrorMessage(error)),
+      error: (error: unknown) => {
+        const message = apiErrorMessage(error);
+        this.loadError.set(message);
+        this.toast.error(message);
+      },
     });
   }
 

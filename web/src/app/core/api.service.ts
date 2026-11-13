@@ -10,6 +10,9 @@ export interface ApiError {
 
 export function apiErrorMessage(error: unknown): string {
   if (error instanceof HttpErrorResponse) {
+    if (error.status === 0) return 'เชื่อมต่อ API ไม่ได้ กรุณาตรวจสอบว่า server รันอยู่';
+    if (error.status === 429) return 'ทำรายการบ่อยเกินไป กรุณารอประมาณ 1 นาที แล้วลองใหม่';
+    if (error.status === 401) return 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่';
     const body = error.error;
     if (body && typeof body === 'object') {
       const message = (body as { message?: unknown }).message;
@@ -17,7 +20,6 @@ export function apiErrorMessage(error: unknown): string {
       if (typeof message === 'string' && message) return message;
     }
     if (typeof body === 'string' && body) return body;
-    if (error.status === 0) return 'เชื่อมต่อ API ไม่ได้ กรุณาตรวจสอบว่า server รันอยู่';
     return error.message || 'เกิดข้อผิดพลาด';
   }
   if (error instanceof Error) return error.message;

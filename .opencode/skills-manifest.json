@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-13",
+  "notes": "Curated for SJP ERP (Angular 22 + NestJS). Re-run scripts/sync-opencode-skills.ps1 after bumping a commit.",
+  "repos": [
+    {
+      "name": "ui-ux-pro-max-skill",
+      "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git",
+      "commit": "6ae86f61f520d6ca229d2f40e070410638c908c5",
+      "skillsPath": ".claude/skills",
+      "skills": [
+        "ui-ux-pro-max"
+      ]
+    },
+    {
+      "name": "jakubkrehel-skills",
+      "url": "https://github.com/jakubkrehel/skills.git",
+      "commit": "a72290d140249813898ba8648becf6415abcb059",
+      "skillsPath": "skills",
+      "skills": [
+        "better-accessibility",
+        "better-colors",
+        "better-interface",
+        "better-layout",
+        "better-typography",
+        "better-ui",
+        "better-writing",
+        "build-design",
+        "explain-interface",
+        "interface-review"
+      ]
+    },
+    {
+      "name": "ux-flow-skills",
+      "url": "https://github.com/jpoindexter/ux-flow-skills.git",
+      "commit": "fc7f4a4b913dc5b1a2029af16fb8ec363331c821",
+      "skillsPath": "skills",
+      "skills": [
+        "userflow",
+        "flow-ai-chat",
+        "flow-app-shell",
+        "flow-auth",
+        "flow-checkout",
+        "flow-empty-states",
+        "flow-errors",
+        "flow-forms",
+        "flow-navigation",
+        "flow-onboarding",
+        "flow-paywall",
+        "flow-permissions",
+        "flow-search",
+        "flow-settings",
+        "flow-sharing",
+        "flow-tables"
+      ]
+    },
+    {
+      "name": "architecture-diagram-skill",
+      "url": "https://github.com/konraddzbik/architecture-diagram-skill.git",
+      "commit": "e0e43282dd9c9a3482331e674b39d518c2239c29",
+      "skillsPath": "skills",
+      "skills": [
+        "architecture-diagram"
+      ]
+    },
+    {
+      "name": "aunop-dev-skill",
+      "url": "https://github.com/AunopDev/aunop-dev-skill.git",
+      "commit": "d9e4b95fc81e3517cd74e3d6e1300b30c3287840",
+      "skillsPath": ".",
+      "skills": [
+        {
+          "id": "aunop-dev-skill",
+          "source": ".",
+          "include": [
+            "SKILL.md",
+            "references",
+            "scripts"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "agentic-awesome-skills",
+      "url": "https://github.com/sickn33/agentic-awesome-skills.git",
+      "commit": "560b762c309d6b96315855d7968727d3bca7df20",
+      "skillsPath": "skills",
+      "skills": [
+        "accessibility-compliance-accessibility-audit",
+        "angular-best-practices",
+        "angular-ui-patterns",
+        "design-token-contrast",
+        "frontend-design",
+        "kpi-dashboard-design",
+        "ui-a11y",
+        "ui-component",
+        "ui-lint",
+        "ui-page",
+        "ui-review",
+        "ui-states",
+        "ui-tokens",
+        "ui-visual-validator",
+        "ux-audit",
+        "ux-copy",
+        "wcag-audit-patterns",
+        "web-design-guidelines",
+        "web-design-system"
+      ]
+    }
+  ]
+}

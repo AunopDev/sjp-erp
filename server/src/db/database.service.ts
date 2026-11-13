@@ -1,7 +1,9 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { chmodSync } from 'node:fs';
 import type { Database } from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { eq } from 'drizzle-orm';
 import { roles } from './schema.js';
 
 export type Db = BetterSQLite3Database & { $client: Database };
@@ -30,6 +32,8 @@ export const RESOURCES = [
   'settings',
   'users',
   'roles',
+  'vehicles',
+  'vehicleBookings',
 ] as const;
 
 const V = ['view'];
@@ -69,6 +73,8 @@ export const DEFAULT_ROLES = [
       accounting: VCE,
       pm: VCEA,
       reports: ['view', 'export'],
+      vehicles: V,
+      vehicleBookings: [...VCE, 'approve'],
     }),
   },
   {
@@ -84,6 +90,8 @@ export const DEFAULT_ROLES = [
       warehouse: V,
       pm: V,
       reports: ['view'],
+      vehicles: V,
+      vehicleBookings: VCE,
     }),
   },
   {
@@ -99,6 +107,8 @@ export const DEFAULT_ROLES = [
       warehouse: VC,
       pm: VCE,
       reports: V,
+      vehicles: V,
+      vehicleBookings: VCE,
     }),
   },
   {
@@ -114,6 +124,8 @@ export const DEFAULT_ROLES = [
       purchase: V,
       warehouse: [...VCE, 'close'],
       reports: ['view', 'export'],
+      vehicles: VCE,
+      vehicleBookings: VCE,
     }),
   },
   {
@@ -128,6 +140,8 @@ export const DEFAULT_ROLES = [
       purchase: [...VCE, 'close'],
       warehouse: V,
       reports: ['view', 'export'],
+      vehicles: V,
+      vehicleBookings: VCE,
     }),
   },
   {
@@ -145,6 +159,8 @@ export const DEFAULT_ROLES = [
       accounting: ['view', 'export'],
       pm: V,
       reports: ['view', 'export'],
+      vehicles: V,
+      vehicleBookings: ['view', 'approve'],
     }),
   },
 ];
@@ -157,6 +173,11 @@ export class DatabaseService implements OnModuleInit {
     const client = this.db.$client;
     client.pragma('journal_mode = WAL');
     client.pragma('foreign_keys = ON');
+    try {
+      chmodSync(client.name, 0o600);
+    } catch {
+      /* best effort — Windows may not support POSIX modes */
+    }
     client.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -287,5 +308,27 @@ export class DatabaseService implements OnModuleInit {
       .values(DEFAULT_ROLES)
       .onConflictDoNothing()
       .run();
+
+    // Add newly introduced resources to roles created before the feature existed.
+    for (const definition of DEFAULT_ROLES) {
+      const row = this.db.select().from(roles).where(eq(roles.id, definition.id)).all()[0];
+      if (!row) continue;
+      const perms = { ...row.perms };
+      let changed = false;
+      for (const resource of ['vehicles', 'vehicleBookings'] as const) {
+        if (!perms[resource]) {
+          perms[resource] = definition.perms[resource] ?? {};
+          changed = true;
+        }
+      }
+      // Manager and executive roles may approve car bookings out of the box.
+      if (['pm', 'exec'].includes(definition.id) && !perms['vehicleBookings']?.['approve']) {
+        perms['vehicleBookings'] = { ...(perms['vehicleBookings'] ?? {}), view: true, approve: true };
+        changed = true;
+      }
+      if (changed) {
+        this.db.update(roles).set({ perms }).where(eq(roles.id, definition.id)).run();
+      }
+    }
   }
 }

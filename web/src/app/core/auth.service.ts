@@ -2,7 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from './api.service';
-import { readToken, writeToken } from './storage';
+import { writeToken } from './storage';
 import type { AuthResult, SafeUser } from './models';
 
 @Injectable({ providedIn: 'root' })
@@ -21,21 +21,19 @@ export class AuthService {
     } catch {
       this.firstRun.set(false);
     }
-    if (readToken()) {
-      try {
-        const user = await firstValueFrom(this.api.get<SafeUser>('/auth/me'));
-        this.user.set(user);
-      } catch {
-        writeToken('');
-        this.user.set(null);
-      }
+    try {
+      const user = await firstValueFrom(this.api.get<SafeUser>('/auth/me'));
+      this.user.set(user);
+    } catch {
+      writeToken('');
+      this.user.set(null);
     }
     this.ready.set(true);
   }
 
   async login(username: string, password: string): Promise<AuthResult> {
     const result = await firstValueFrom(this.api.post<AuthResult>('/auth/login', { username, password }));
-    writeToken(result.token);
+    writeToken('');
     this.user.set(result.user);
     this.firstRun.set(false);
     return result;
@@ -43,7 +41,7 @@ export class AuthService {
 
   async setup(name: string, username: string, password: string): Promise<AuthResult> {
     const result = await firstValueFrom(this.api.post<AuthResult>('/auth/setup', { name, username, password }));
-    writeToken(result.token);
+    writeToken('');
     this.user.set(result.user);
     this.firstRun.set(false);
     return result;
@@ -58,9 +56,20 @@ export class AuthService {
   }
 
   logout(): void {
+    void firstValueFrom(this.api.post('/auth/logout', {})).catch(() => undefined);
     writeToken('');
     this.user.set(null);
     void this.router.navigate(['/login']);
+  }
+
+  /** Called when the API reports that the session is no longer valid. */
+  handleSessionExpired(): void {
+    if (!this.user()) return;
+    writeToken('');
+    this.user.set(null);
+    const current = this.router.url;
+    const redirect = current && !current.startsWith('/login') ? current : undefined;
+    void this.router.navigate(['/login'], { queryParams: { redirect, expired: 1 } });
   }
 
   can(resource: string, action: string): boolean {

@@ -1,8 +1,6 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { createHmac } from 'node:crypto';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
 import { webhookDeliveries, webhooks } from '../db/schema.js';
@@ -10,7 +8,8 @@ import type { SafeUser } from '../auth/user.types.js';
 import { AccessService } from '../common/access.service.js';
 import { AuditService } from '../common/audit.service.js';
 import { nowIso } from '../common/dates.js';
-import { bad, notFound } from '../common/exceptions.js';
+import { bad, forbidden, notFound } from '../common/exceptions.js';
+import { assertSafeUrl, postJsonPinned, resolveSafeAddress, type ResolvedTarget } from '../common/network-guard.js';
 import { EventsService, type EventRow } from '../events/events.service.js';
 
 export type WebhookRow = typeof webhooks.$inferSelect;
@@ -63,11 +62,17 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
 
   save(user: SafeUser, id: string | null, input: WebhookInput) {
     this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่ตั้งค่า Webhook ได้');
     const name = String(input.name ?? '').trim();
     const url = String(input.url ?? '').trim();
     if (!name) bad('กรุณากรอกชื่อ Webhook');
     if (!/^https?:\/\//i.test(url)) bad('URL ต้องขึ้นต้นด้วย http:// หรือ https://');
-    this.assertSafeUrl(url);
+    const allowPrivate = process.env.WEBHOOK_ALLOW_PRIVATE === 'true';
+    try {
+      assertSafeUrl(url, allowPrivate);
+    } catch (error) {
+      bad(error instanceof Error ? error.message : 'URL ของ Webhook ไม่ถูกต้อง');
+    }
     const events = this.normalizeEvents(input.events);
     const existing = id ? this.db.select().from(webhooks).where(eq(webhooks.id, id)).all()[0] : undefined;
     if (id && !existing) notFound('ไม่พบ Webhook');
@@ -100,6 +105,7 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
 
   remove(user: SafeUser, id: string): { ok: true } {
     this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่ลบ Webhook ได้');
     const row = this.db.select().from(webhooks).where(eq(webhooks.id, id)).all()[0];
     if (!row) notFound('ไม่พบ Webhook');
     this.db.delete(webhookDeliveries).where(eq(webhookDeliveries.webhookId, id)).run();
@@ -124,6 +130,7 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
 
   async test(user: SafeUser, id: string) {
     this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่ทดสอบ Webhook ได้');
     const webhook = this.db.select().from(webhooks).where(eq(webhooks.id, id)).all()[0];
     if (!webhook) notFound('ไม่พบ Webhook');
     const delivery = await this.enqueue(webhook, {
@@ -136,6 +143,7 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
 
   async retry(user: SafeUser, deliveryId: string) {
     this.access.require(user, 'settings', 'edit');
+    if (!user.isAdmin) forbidden('เฉพาะผู้ดูแลระบบเท่านั้นที่ส่ง Webhook ซ้ำได้');
     const delivery = this.db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, deliveryId)).all()[0];
     if (!delivery) notFound('ไม่พบรายการส่ง');
     const reset = this.db
@@ -242,20 +250,13 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      await this.assertSafeTarget(webhook.url);
-      const response = await fetch(webhook.url, {
-        method: 'POST',
-        headers,
-        body,
-        redirect: 'manual',
-        signal: AbortSignal.timeout(10000),
-      });
+      const target = await this.resolveTarget(webhook.url);
+      const response = await postJsonPinned(webhook.url, body, headers, target);
       if (response.status >= 300 && response.status < 400) {
         throw new Error(`ไม่อนุญาตให้ redirect (HTTP ${response.status})`);
       }
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(`HTTP ${response.status}${text ? ` — ${text.slice(0, 200)}` : ''}`);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response.status}${response.text ? ` — ${response.text.slice(0, 200)}` : ''}`);
       }
       const attempts = delivery.attempts + 1;
       this.db.update(webhookDeliveries).set({
@@ -288,72 +289,14 @@ export class WebhooksService implements OnModuleInit, OnModuleDestroy {
     return { ...delivery, status, attempts, nextAttemptAt: next, lastError: String(message).slice(0, 500), updatedAt: now };
   }
 
-  private assertSafeUrl(raw: string): void {
-    let parsed: URL;
+  private async resolveTarget(raw: string): Promise<ResolvedTarget> {
+    const allowPrivate = process.env.WEBHOOK_ALLOW_PRIVATE === 'true';
     try {
-      parsed = new URL(raw);
-    } catch {
-      bad('URL ของ Webhook ไม่ถูกต้อง');
+      assertSafeUrl(raw, allowPrivate);
+      return await resolveSafeAddress(new URL(raw).hostname, allowPrivate);
+    } catch (error) {
+      bad(error instanceof Error ? error.message : 'ปลายทาง Webhook ไม่ปลอดภัย');
     }
-    if (process.env.WEBHOOK_ALLOW_PRIVATE === 'true') return;
-    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    if (this.isPrivateHost(host)) bad('ไม่อนุญาตให้ใช้ Webhook ไปยัง localhost หรือเครือข่ายภายใน');
-  }
-
-  private async assertSafeTarget(raw: string): Promise<void> {
-    if (process.env.WEBHOOK_ALLOW_PRIVATE === 'true') return;
-    const parsed = new URL(raw);
-    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    if (this.isPrivateHost(host)) bad('ไม่อนุญาตให้ส่ง Webhook ไปยัง localhost หรือเครือข่ายภายใน');
-    if (isIP(host)) return;
-    const addresses = await lookup(host, { all: true }).catch(() => []);
-    if (!addresses.length) bad(`resolve hostname ของ Webhook ไม่ได้: ${host}`);
-    if (addresses.some((entry) => this.isPrivateHost(entry.address))) {
-      bad('ปลายทาง Webhook ชี้ไปยังเครือข่ายภายใน');
-    }
-  }
-
-  private isPrivateHost(host: string): boolean {
-    const value = host.toLowerCase();
-    if (
-      value === 'localhost' ||
-      value === '0.0.0.0' ||
-      value === '::1' ||
-      value === '::' ||
-      value.endsWith('.localhost') ||
-      value.endsWith('.local') ||
-      value.endsWith('.internal') ||
-      value.endsWith('.lan') ||
-      value.endsWith('.home')
-    ) {
-      return true;
-    }
-    if (isIP(value) === 4) {
-      const parts = value.split('.').map(Number);
-      if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return true;
-      if (parts[0] === 169 && parts[1] === 254) return true;
-      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-      if (parts[0] === 192 && parts[1] === 168) return true;
-      if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
-      if (parts[0] >= 224) return true;
-      return false;
-    }
-    if (isIP(value) === 6) {
-      return (
-        value === '::1' ||
-        value === '::' ||
-        value.startsWith('fc') ||
-        value.startsWith('fd') ||
-        value.startsWith('fe8') ||
-        value.startsWith('fe9') ||
-        value.startsWith('fea') ||
-        value.startsWith('feb') ||
-        value.startsWith('::ffff:127.') ||
-        value.startsWith('::ffff:10.') ||
-        value.startsWith('::ffff:192.168.')
-      );
-    }
-    return false;
   }
 
   private matches(patterns: string[], type: string): boolean {

@@ -1,0 +1,272 @@
+SJP ERP — Security Review Remediation Checklist
+วันที่ตรวจ: 11 พ.ย. 2026
+ขอบเขต: static review เฉพาะ server/src และ web/src
+หมายเหตุ: ยังไม่แก้โค้ดใด ๆ และยังไม่ได้รัน dynamic test เพราะ node_modules ถูกลบแล้ว
+
+
+====================================================================
+กลุ่ม A — ต้องแก้ก่อน (กระทบสิทธิ์และข้อมูลธุรกิจ)
+====================================================================
+
+[ ] A1. ล็อกสถานะการจองรถไม่ให้แก้ผ่าน generic API
+    ไฟล์: server/src/records/records.service.ts (update/sanitize)
+          server/src/meta/entities.ts:859
+    ทำ:
+    - reject ฟิลด์ status ของ vehicleBookings ใน create/update
+    - หรือตั้ง readOnly ที่นิยามฟิลด์ status
+    - อนุญาตเปลี่ยนสถานะเฉพาะผ่าน decideVehicleBooking() / endpoint /decision
+    - บังคับอนุมัติใหม่เมื่อแก้ vehicle, startAt, endAt หลังอนุมัติแล้ว
+    เสร็จเมื่อ:
+    - POST/PATCH /api/records/vehicleBookings ด้วย status "อนุมัติแล้ว" ถูกปฏิเสธ
+    - ผู้ใช้ที่ไม่มีสิทธิ์ approve อนุมัติไม่ได้ทุกช่องทาง
+
+[ ] A2. ล็อกการเปลี่ยน role และการรีเซ็ตรหัสผ่านของผู้ใช้
+    ไฟล์: server/src/auth/users.service.ts:113, :149
+          server/src/auth/users.controller.ts:43
+    ทำ:
+    - ห้ามเปลี่ยน roleId เป็น role ที่มีสิทธิ์สูงกว่าผู้กระทำ
+    - เฉพาะ isAdmin เท่านั้นที่กำหนด role admin ได้
+    - แยกสิทธิ์ users.assign_role / users.reset_password หรือบังคับ admin
+    - ห้ามรีเซ็ตรหัสผ่านของ admin คนอื่นจากบัญชีที่ไม่ใช่ admin
+    - เพิ่ม audit และบังคับ re-auth สำหรับการเปลี่ยน role/รหัสผ่าน
+    เสร็จเมื่อ:
+    - ผู้ใช้ที่มีแค่ users.edit ยกระดับตัวเองเป็น admin ไม่ได้
+    - users.create สร้างผู้ใช้ role admin ไม่ได้ถ้าไม่ใช่ admin
+
+[ ] A3. เพิ่ม field-level guard ใน generic record update
+    ไฟล์: server/src/records/records.service.ts:227
+    ทำ:
+    - tickets: เปลี่ยน assignee/team ต้องมี tickets.assign
+    - projects: ล็อก manager/team/value/boq เมื่อโครงการ closed
+    - purchaseOrders: ล็อก vendor/lines/orderDate เมื่อ ordered/received/closed
+    - vehicleBookings: ล็อกฟิลด์สำคัญหลังอนุมัติ
+    - serials: ห้ามแก้ status/warehouse ตรง ๆ ให้ใช้ stock move เท่านั้น
+    เสร็จเมื่อ:
+    - ผู้ใช้ edit ทั่วไปข้ามขั้นตอน assign/approve/close ไม่ได้
+
+[ ] A4. ปิดช่องทางแก้เอกสารที่จบแล้ว
+    ไฟล์: server/src/records/records.service.ts (update)
+    ทำ:
+    - ปฏิเสธ update เมื่อ entity อยู่ในสถานะ final/closed/received
+      เว้นแต่มีสิทธิ์ reopen
+    - ครอบคลุม tickets, projects, purchaseOrders, invoices, receipts
+    เสร็จเมื่อ:
+    - แก้เอกสารที่ปิดแล้วผ่าน API ตรง ๆ ไม่ได้
+
+
+====================================================================
+กลุ่ม B — ควรแก้รอบเดียวกัน (ความปลอดภัยระดับกลาง)
+====================================================================
+
+[ ] B1. บล็อก module key ที่ชนกับ resource ระบบ
+    ไฟล์: server/src/meta/metadata.service.ts:28, :108
+    ทำ:
+    - ห้ามใช้ key ซ้ำกับ RESOURCES, entity key เดิม และชื่อสงวน
+    - เปลี่ยน resource ของ custom module เป็น namespace เช่น custom:<key>
+    - เพิ่ม blocklist ชื่อ constructor, toString, __proto__
+    เสร็จเมื่อ:
+    - สร้างโมดูล key users, roles, settings ไม่ได้
+
+[ ] B2. จำกัดการแก้ role/permission
+    ไฟล์: server/src/meta/metadata.service.ts:359
+    ทำ:
+    - อนุญาตเฉพาะ admin
+    - validate perms ว่ามีเฉพาะ resource/action ที่อนุญาต
+    - ห้าม role แก้สิทธิ์ของตัวเองให้สูงขึ้น
+    เสร็จเมื่อ:
+    - ผู้ใช้ที่มี roles.edit กลายเป็น admin ไม่ได้
+
+[ ] B3. จำกัดการอัปโหลดไฟล์
+    ไฟล์: server/src/files/files.controller.ts:12
+          server/src/files/files.service.ts:51
+    ทำ:
+    - เพิ่ม access.require เช่น files.upload หรือผูกกับ entity create
+    - allowlist MIME/extension
+    - จำกัดจำนวนไฟล์/ขนาดต่อผู้ใช้/ต่อช่วงเวลา
+    - เขียนไฟล์แบบ async
+    - กำหนด Content-Type จาก allowlist ไม่ใช่ค่าจาก client ตรง ๆ
+    เสร็จเมื่อ:
+    - ผู้ใช้สิทธิ์อ่านอย่างเดียวอัปโหลดไม่ได้
+    - อัปโหลดชนิดไฟล์ต้องห้ามไม่ได้
+
+[ ] B4. ปรับ Backup export/restore
+    ไฟล์: server/src/backup/backup.service.ts:42, :89
+    ทำ:
+    - ไม่ส่ง passwordHash และ secret ของ SMTP/LINE ออกไป หรือเข้ารหัส backup
+    - preserve audit เดิม หรือแยก audit ของการ restore
+    - restore เฉพาะ admin + re-auth + ยืนยันสองชั้น
+    - validate schema ของ payload ก่อนลบข้อมูล
+    เสร็จเมื่อ:
+    - backup ที่หลุดไม่ทำให้ crack รหัสผ่านหรือได้ secret ตรง ๆ
+    - restore ปลอมหรือลบ audit ไม่ได้
+
+[ ] B5. ปิด SSRF ของ SMTP
+    ไฟล์: server/src/notify/notify.service.ts:92, :136
+    ทำ:
+    - เพิ่ม private-IP/DNS guard
+    - จำกัด host เป็น env หรือ admin เท่านั้น
+    - ไม่ส่ง error ภายในแบบละเอียดกลับ client
+    เสร็จเมื่อ:
+    - ตั้ง smtpHost เป็น 127.0.0.1 หรือ IP ภายในแล้วถูกปฏิเสธ
+
+[ ] B6. ปิด SSRF ของ Webhook
+    ไฟล์: server/src/webhooks/webhooks.service.ts:303
+    ทำ:
+    - normalize IPv6 และตรวจ IPv4-mapped
+      เช่น ::ffff:7f00:1 และ ::ffff:c0a8:101
+    - ป้องกัน DNS rebinding โดย pin IP ที่ resolve แล้ว หรือ re-check ก่อนเชื่อมต่อ
+    - จำกัดการตั้ง webhook เฉพาะ admin
+    เสร็จเมื่อ:
+    - ยิง webhook ไป http://[::ffff:7f00:1]/ ไม่ได้
+
+[ ] B7. เสริมความปลอดภัยของ session/token
+    ไฟล์: server/src/main.ts
+          server/src/auth/auth.service.ts:55
+          web/src/app/core/storage.ts:18
+    ทำ:
+    - เพิ่ม Content-Security-Policy
+    - พิจารณาเปลี่ยนจาก localStorage เป็น HttpOnly cookie
+      หรือ access token อายุสั้น + refresh
+    - revoke token เมื่อเปลี่ยนรหัสผ่าน/role
+    - ปิด X-Powered-By
+    เสร็จเมื่อ:
+    - เปลี่ยนรหัสแล้ว token เก่าใช้ไม่ได้
+    - มี CSP header
+
+[ ] B8. แก้ race condition ของ setup ครั้งแรก
+    ไฟล์: server/src/auth/auth.service.ts:27
+    ทำ:
+    - ใช้ setup token, ล็อกให้เฉพาะ localhost
+      หรือเพิ่มข้อจำกัดระดับ DB
+    เสร็จเมื่อ:
+    - ยิง /auth/setup พร้อมกันสองครั้งแล้วสร้าง admin ได้คนเดียว
+
+
+====================================================================
+กลุ่ม C — Hardening / ลดข้อมูลรั่ว
+====================================================================
+
+[ ] C1. ตรวจสิทธิ์การเข้าถึงข้อมูลให้ครบ
+    ไฟล์: server/src/meta/meta.controller.ts:130
+          server/src/records/records.service.ts:502, :517
+          server/src/operations/operations.controllers.ts:206
+    ทำ:
+    - GET /meta/options/users ต้องเช็ก users.view
+    - labelOf() ต้องเช็ก scope
+    - ไม่คืนฟิลด์ hidden: true ให้ผู้ใช้ที่ไม่มีสิทธิ์
+    - /reports/:name ต้องเช็ก reports.view
+    เสร็จเมื่อ:
+    - user ทั่วไปไม่เห็นรายชื่อผู้ใช้/ชื่อ record นอก scope/ฟิลด์ที่ซ่อน
+
+[ ] C2. เพิ่ม DTO validation จริง
+    ไฟล์: server/src/main.ts:35
+    ทำ:
+    - เปิด whitelist: true และ forbidNonWhitelisted: true
+    - เปลี่ยน controller body จาก interface/Record<string, unknown>
+      เป็น DTO ที่มี class-validator
+    - กำหนด body limit ให้ชัดเจน โดยเฉพาะ backup/restore
+    เสร็จเมื่อ:
+    - ส่งฟิลด์เกิน/ชนิดผิดแล้วได้ 400 ไม่ใช่เงียบ ๆ ผ่าน
+
+[ ] C3. แข็ง registry และ error handling
+    ไฟล์: server/src/meta/entities.ts:865
+    ทำ:
+    - ใช้ Object.hasOwn หรือ Map แทนการอ่าน property ตรง ๆ
+    - แปลง error ของ entity ที่ไม่พบเป็น 404/400 ไม่ใช่ 500
+    - ตรวจ reserved/prototype keys ทั้ง entity และ field
+    เสร็จเมื่อ:
+    - ยิง /records/constructor, /records/toString แล้วไม่เกิด 500
+
+[ ] C4. ลดความเสี่ยง DoS
+    ไฟล์: server/src/records/records.service.ts (list/search)
+          server/src/pdf/pdf.service.ts
+    ทำ:
+    - ทำ pagination/filter ที่ระดับ SQL แทนการโหลดทั้งหมดเข้า memory
+    - จำกัด concurrency ของ PDF
+    - จำกัดขนาด/จำนวนไฟล์และ backup ที่อ่านเข้า memory
+    - พิจารณา rate limit เฉพาะ endpoint ที่หนัก
+      (PDF, upload, search, webhook test)
+    เสร็จเมื่อ:
+    - ยิง PDF/search/upload ซ้ำ ๆ แล้ว server ไม่ค้างหรือ memory พุ่ง
+
+[ ] C5. ปรับ deployment/transport
+    ไฟล์: server/src/main.ts
+    ทำ:
+    - บังคับ NODE_ENV=production และตั้ง CORS_ORIGIN ชัดเจน
+    - ตรวจว่า dev CORS origin: true ไม่ถูกใช้ใน production
+    - เพิ่ม CSP และ security headers ที่เหลือ
+    - ตรวจสิทธิ์ไฟล์ server/data และ uploads ให้เข้าถึงได้เฉพาะ process
+    เสร็จเมื่อ:
+    - production ไม่สะท้อน origin ใด ๆ และมี CSP
+
+[ ] C6. ตรวจ input ที่ยังไม่เข้ม
+    ไฟล์: server/src/auth/users.service.ts
+          server/src/backup/backup.service.ts (legacyImport)
+          server/src/meta/metadata.service.ts (workflow)
+    ทำ:
+    - users.update: ตรวจ type ของ projectIds, siteIds, active
+      (ต้องเป็น array/boolean จริง)
+    - legacyImport: validate โครงสร้าง record ก่อน insert
+    - workflow: ตรวจ approverRole/approverUser ว่ามีอยู่จริง
+    - project step docs/fields: ตรวจ key และชนิดข้อมูล
+    เสร็จเมื่อ:
+    - ส่งค่าผิดชนิดแล้วไม่ทำให้ข้อมูลเสียหรือเกิด 500
+
+
+====================================================================
+กลุ่ม D — งานทดสอบและยืนยัน
+====================================================================
+
+[ ] D1. ติดตั้ง dependencies และรันตรวจพื้นฐาน
+    คำสั่ง:
+    - cd server; npm ci
+    - cd web; npm ci
+    - npm audit
+    - npm test
+    - build
+    เสร็จเมื่อ:
+    - รู้ผล dependency vulnerability และ test เดิมยังผ่าน
+
+[ ] D2. เพิ่ม regression tests สำหรับช่องโหว่ที่แก้
+    รายการทดสอบ:
+    - vehicle booking self-approval
+    - users.edit -> admin escalation
+    - generic PATCH bypass (assignee, value, lines, status)
+    - module key collision (users/roles)
+    - upload permission/MIME
+    - SSRF SMTP/webhook (IPv6 mapped)
+    - backup restore/audit
+    - setup race
+    เสร็จเมื่อ:
+    - test พวกนี้ fail ก่อนแก้ และผ่านหลังแก้
+
+[ ] D3. เพิ่มเอกสาร/Finding register
+    ทำ:
+    - บันทึก finding, ระดับความรุนแรง, เจ้าของ, สถานะ, วันที่แก้
+    - ระบุว่า settings.edit และ users.edit เป็นสิทธิ์ระดับสูง
+      ที่ต้องจำกัดเฉพาะ admin
+    เสร็จเมื่อ:
+    - ทีมมี checklist ตรวจซ้ำก่อน deploy
+
+
+====================================================================
+ลำดับที่แนะนำถ้าทำทันที
+====================================================================
+
+1) A1 — ปิด self-approval การจองรถ
+2) A2 — ล็อก role/password ของผู้ใช้
+3) A3-A4 — เพิ่ม field/state guard ใน generic update
+4) B1-B2 — ปิด module key collision และการแก้ role ตัวเอง
+5) B3-B6 — upload, backup, SMTP SSRF, webhook SSRF
+6) B7-B8 — token/CSP และ setup race
+7) C1-C6 และ D1-D3 — hardening และ tests
+
+====================================================================
+สรุป
+====================================================================
+
+- ไม่พบช่องโหว่ระดับวิกฤตที่ใช้ได้ก่อนล็อกอิน
+  (ไม่พบ pre-auth RCE / SQL injection / path traversal)
+- ปัญหาหลักคือ broken access control และ business-logic bypass
+  ซึ่งใช้ได้ด้วยบัญชีผู้ใช้ปกติ
+- ควรปิดกลุ่ม A ก่อน แล้วตามด้วย B, C, D ตามลำดับ

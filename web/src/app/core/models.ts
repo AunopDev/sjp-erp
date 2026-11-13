@@ -72,6 +72,10 @@ export interface EntityDef {
   scoped?: boolean;
   system?: boolean;
   custom?: boolean;
+  group?: string;
+  navLabel?: string;
+  icon?: string;
+  description?: string;
   workflowKey?: string;
   can?: Record<string, boolean>;
 }
@@ -108,6 +112,7 @@ export interface ApprovalRow {
   decidedByName: string;
   approverRoleName: string;
   approverUserName: string;
+  canDecide: boolean;
 }
 
 export interface StepDoc {

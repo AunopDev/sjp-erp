@@ -1,6 +1,6 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
 import { counters, records, users } from '../db/schema.js';
 import type { SafeUser } from '../auth/user.types.js';
@@ -10,7 +10,7 @@ import { AuditService } from '../common/audit.service.js';
 import { nowIso, isDateOnly } from '../common/dates.js';
 import { FieldValidationError, bad, notFound } from '../common/exceptions.js';
 import { EventsService } from '../events/events.service.js';
-import { getEntity, ENTITY_DEFS, LISTS, projectSteps, ENTITY_WORKFLOW_KEY, WORKFLOWS, type EntityDef, type FieldDef } from '../meta/entities.js';
+import { getEntity, findEntity, ENTITY_DEFS, LISTS, projectSteps, ENTITY_WORKFLOW_KEY, WORKFLOWS, type EntityDef, type FieldDef } from '../meta/entities.js';
 
 export interface ListQuery {
   search?: string;
@@ -48,7 +48,24 @@ export type DecoratedRecord = Record<string, unknown> & {
 const isEmpty = (value: unknown): boolean =>
   value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
 
-const SEARCHABLE: FieldDef['type'][] = ['text', 'textarea', 'select', 'email', 'phone', 'url'];
+/**
+ * System entities keep their structure locked, but these ones are ordinary
+ * business records that users still create and edit from the UI.
+ */
+const SYSTEM_RECORD_CRUD = new Set(['vehicles', 'vehicleBookings']);
+
+/** Fields that represent assignment; changing them requires the resource's `assign` action. */
+const ASSIGN_FIELDS: Record<string, string[]> = {
+  tickets: ['assignee', 'team'],
+  projects: ['manager', 'team'],
+};
+
+/** Entities whose final workflow state must not be edited through the generic record endpoints. */
+const FINAL_LOCKED_ENTITIES = new Set(['tickets', 'projects', 'purchaseOrders', 'invoices', 'expenses']);
+
+/** Purchase-order fields that are frozen once the document leaves draft. */
+const PO_LOCKED_FIELDS = ['vendor', 'project', 'orderDate', 'dueDate', 'lines'];
+const PO_LOCKED_STATUSES = ['ordered', 'partial', 'received', 'closed', 'cancelled'];
 
 @Injectable()
 export class RecordsService {
@@ -64,7 +81,7 @@ export class RecordsService {
 
   all(user: SafeUser, entityKey: string, options: { includeDeleted?: boolean } = {}): DecoratedRecord[] {
     const def = this.access.requireEntity(user, entityKey, 'view');
-    return this.rawScoped(def, user, options.includeDeleted ?? false).map((row) => this.decorate(def, row));
+    return this.rawScoped(def, user, options.includeDeleted ?? false).map((row) => this.decorate(def, row, user));
   }
 
   rawAll(entityKey: string, includeDeleted = false): RawRecord[] {
@@ -86,47 +103,106 @@ export class RecordsService {
 
   list(user: SafeUser, entityKey: string, query: ListQuery = {}) {
     const def = this.access.requireEntity(user, entityKey, 'view');
-    let rows = this.rawScoped(def, user, false).map((row) => this.decorate(def, row));
+    return this.listFromSql(def, query, user, this.scopeCondition(def, user));
+  }
 
-    const filters = query.filters ?? {};
-    for (const [key, value] of Object.entries(filters)) {
-      if (value === undefined || value === '') continue;
-      rows = rows.filter((row) => String(row[key] ?? '') === String(value));
+  /** Translate the row-level scope rules into a SQL predicate. */
+  private scopeCondition(def: EntityDef, user: SafeUser): SQL | undefined {
+    if (user.isAdmin || user.scope === 'all' || !def.scoped) return undefined;
+    const data = records.data;
+    const mine = sql`(json_extract(${data}, '$.assignee') = ${user.id} OR json_extract(${data}, '$.manager') = ${user.id} OR ${records.createdBy} = ${user.id})`;
+    let scope: SQL;
+    switch (user.scope) {
+      case 'own':
+        return mine;
+      case 'team':
+        if (!user.team) return sql`1 = 0`;
+        scope = sql`(json_extract(${data}, '$.team') = ${user.team})`;
+        break;
+      case 'dept':
+        if (!user.dept) return sql`1 = 0`;
+        scope = sql`(COALESCE(NULLIF(json_extract(${data}, '$.assignee'), ''), NULLIF(json_extract(${data}, '$.manager'), ''), ${records.createdBy}) IN (SELECT id FROM users WHERE dept = ${user.dept}))`;
+        break;
+      case 'project': {
+        const ids = user.projectIds ?? [];
+        if (!ids.length) return sql`1 = 0`;
+        scope = def.key === 'projects' ? inArray(records.id, ids) : inArray(sql`json_extract(${data}, '$.project')`, ids);
+        break;
+      }
+      case 'site': {
+        const ids = user.siteIds ?? [];
+        if (!ids.length) return sql`1 = 0`;
+        scope = def.key === 'sites' ? inArray(records.id, ids) : inArray(sql`json_extract(${data}, '$.site')`, ids);
+        break;
+      }
+      default:
+        return sql`1 = 0`;
     }
+    return sql`(${mine} OR ${scope})`;
+  }
 
+  private listFromSql(def: EntityDef, query: ListQuery, user: SafeUser, scope?: SQL) {
+    const allowed = new Set(['code', 'status', 'stepLabel', '_createdAt', '_updatedAt', ...def.filters, ...def.cols, ...def.fields.map((field) => field.key)]);
+    const conditions: SQL[] = [eq(records.entity, def.key), eq(records.deleted, false)];
+    if (scope) conditions.push(scope);
+    for (const [key, value] of Object.entries(query.filters ?? {})) {
+      if (value === undefined || value === '' || !allowed.has(key)) continue;
+      if (key === 'code') conditions.push(eq(records.code, String(value)));
+      else if (key === '_createdAt') conditions.push(eq(records.createdAt, String(value)));
+      else if (key === '_updatedAt') conditions.push(eq(records.updatedAt, String(value)));
+      else conditions.push(sql`CAST(json_extract(${records.data}, ${'$.' + key}) AS TEXT) = ${String(value)}`);
+    }
     const search = String(query.search ?? '').trim().toLowerCase();
     if (search) {
-      const fields = def.fields.filter((f) => SEARCHABLE.includes(f.type));
-      rows = rows.filter((row) => {
-        const hay = [
-          row.code,
-          ...fields.map((f) => row[f.key]),
-          ...Object.values(row._labels ?? {}),
-        ];
-        return hay.some((value) => value !== undefined && String(value).toLowerCase().includes(search));
-      });
+      const pattern = `%${search}%`;
+      const parts: SQL[] = [sql`lower(${records.code}) LIKE ${pattern}`, sql`lower(${records.data}) LIKE ${pattern}`];
+      for (const field of def.fields) {
+        if (field.type !== 'ref' || !field.ref) continue;
+        const path = '$.' + field.key;
+        if (field.ref === 'users') {
+          parts.push(sql`EXISTS (SELECT 1 FROM users u WHERE u.id = json_extract(${records.data}, ${path}) AND lower(u.name) LIKE ${pattern})`);
+        } else {
+          const refDef = findEntity(field.ref);
+          if (!refDef || refDef.title === 'code') continue;
+          parts.push(
+            sql`EXISTS (SELECT 1 FROM records r2 WHERE r2.id = json_extract(${records.data}, ${path}) AND (lower(r2.code) LIKE ${pattern} OR lower(json_extract(r2.data, ${'$.' + refDef.title})) LIKE ${pattern}))`,
+          );
+        }
+      }
+      conditions.push(sql`(${sql.join(parts, sql` OR `)})`);
     }
-
+    const where = and(...conditions);
+    const total = Number(this.db.select({ value: sql<number>`count(*)` }).from(records).where(where).all()[0]?.value ?? 0);
+    const pageSize = Math.min(Math.max(Number(query.pageSize) || 50, 1), 500);
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(Math.max(Number(query.page) || 1, 1), pages);
     const sort = String(query.sort || '-_createdAt');
     const desc = sort.startsWith('-');
     const key = sort.replace(/^-/, '');
-    rows = [...rows].sort((a, b) => {
-      const x = a[key];
-      const y = b[key];
-      if (x === undefined || x === null || x === '') return 1;
-      if (y === undefined || y === null || y === '') return -1;
-      if (typeof x === 'number' && typeof y === 'number') return (x - y) * (desc ? -1 : 1);
-      return String(x).localeCompare(String(y), 'th', { numeric: true }) * (desc ? -1 : 1);
-    });
-
-    const pageSize = Math.min(Math.max(Number(query.pageSize) || 50, 1), 500);
-    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
-    const page = Math.min(Math.max(Number(query.page) || 1, 1), pages);
+    const expression =
+      key === 'code'
+        ? sql`${records.code}`
+        : key === '_updatedAt'
+          ? sql`${records.updatedAt}`
+          : key === '_createdAt'
+            ? sql`${records.createdAt}`
+            : allowed.has(key)
+              ? sql`json_extract(${records.data}, ${'$.' + key})`
+              : sql`${records.createdAt}`;
+    const order = desc ? sql`${expression} DESC` : sql`${expression} ASC`;
+    const rows = this.db
+      .select()
+      .from(records)
+      .where(where)
+      .orderBy(order)
+      .limit(pageSize)
+      .offset((page - 1) * pageSize)
+      .all();
     return {
-      total: rows.length,
+      total,
       page,
       pageSize,
-      items: rows.slice((page - 1) * pageSize, page * pageSize),
+      items: rows.map((row) => this.decorate(def, row as RawRecord, user)),
     };
   }
 
@@ -135,7 +211,7 @@ export class RecordsService {
     const row = this.rawGet(entityKey, id);
     if (!row) notFound('ไม่พบรายการ');
     this.access.requireSee(user, def, row);
-    return this.decorate(def, row);
+    return this.decorate(def, row, user);
   }
 
   rawScoped(def: EntityDef, user: SafeUser, includeDeleted = false): RawRecord[] {
@@ -150,9 +226,12 @@ export class RecordsService {
     const def = getEntity(entityKey);
     if (!def) notFound('ไม่พบชนิดข้อมูล');
     if (!options.system) this.access.requireEntity(user, entityKey, 'create');
-    if (def.system && !options.system) bad('ข้อมูลชนิดนี้สร้างได้จากขั้นตอนของระบบเท่านั้น');
+    if (def.system && !options.system && !SYSTEM_RECORD_CRUD.has(def.key)) {
+      bad('ข้อมูลชนิดนี้สร้างได้จากขั้นตอนของระบบเท่านั้น');
+    }
 
     const data = this.sanitize(def, values);
+    this.guardCreate(def, data, options);
     for (const [key, value] of Object.entries(this.defaultsFor(def))) {
       if (data[key] === undefined || data[key] === '') data[key] = value;
     }
@@ -174,7 +253,7 @@ export class RecordsService {
       updatedAt: now,
     };
     this.db.insert(records).values(row).run();
-    const decorated = this.decorate(def, row as RawRecord);
+    const decorated = this.decorate(def, row as RawRecord, user);
     this.audit.log(options.actor ?? user, {
       action: 'create',
       entity: def.key,
@@ -194,6 +273,28 @@ export class RecordsService {
     return decorated;
   }
 
+  decideVehicleBooking(user: SafeUser, entityKey: string, id: string, decision: string, note = ''): DecoratedRecord {
+    if (entityKey !== 'vehicleBookings') notFound('ไม่พบชนิดข้อมูล');
+    const def = this.access.requireEntity(user, 'vehicleBookings', 'approve');
+    const row = this.rawGet('vehicleBookings', id);
+    if (!row) notFound('ไม่พบรายการ');
+    if (row.deleted) bad('รายการนี้ถูกยกเลิก/ซ่อนแล้ว');
+    this.access.requireSee(user, def, row);
+    const status = decision === 'approve' ? 'อนุมัติแล้ว' : decision === 'reject' ? 'ไม่อนุมัติ' : '';
+    if (!status) bad('ผลการพิจารณาไม่ถูกต้อง');
+    if (String(row.data['status'] ?? '') !== 'รออนุมัติ') bad('รายการนี้ถูกพิจารณาแล้ว');
+    const changes: Record<string, unknown> = { status };
+    const reason = note.trim();
+    if (reason) {
+      const current = String(row.data['note'] ?? '').trim();
+      changes['note'] = [current, `[${status}] ${reason}`].filter(Boolean).join('\n');
+    }
+    return this.update(user, 'vehicleBookings', id, changes, {
+      system: true,
+      summary: `${status === 'อนุมัติแล้ว' ? 'อนุมัติ' : 'ไม่อนุมัติ'}การจองรถ ${row.code}`,
+    });
+  }
+
   update(
     user: SafeUser,
     entityKey: string,
@@ -204,14 +305,18 @@ export class RecordsService {
     const def = getEntity(entityKey);
     if (!def) notFound('ไม่พบชนิดข้อมูล');
     if (!options.system) this.access.requireEntity(user, entityKey, 'edit');
-    if (def.system && !options.system) bad('ข้อมูลชนิดนี้แก้ไขได้จากขั้นตอนของระบบเท่านั้น');
+    if (def.system && !options.system && !SYSTEM_RECORD_CRUD.has(def.key)) {
+      bad('ข้อมูลชนิดนี้แก้ไขได้จากขั้นตอนของระบบเท่านั้น');
+    }
     const row = this.rawGet(entityKey, id);
     if (!row) notFound('ไม่พบรายการ');
     if (row.deleted) bad('รายการนี้ถูกยกเลิก/ซ่อนแล้ว');
     if (!options.system) this.access.requireSee(user, def, row);
 
     const before = { ...row.data };
-    const next = { ...row.data, ...this.sanitize(def, changes) };
+    const patch = this.sanitize(def, changes);
+    this.guardUpdate(def, row, patch, user, options);
+    const next = { ...row.data, ...patch };
     this.validate(def, next, user, id);
     this.validateBusiness(def, next, id);
     const now = nowIso();
@@ -221,7 +326,7 @@ export class RecordsService {
       .where(eq(records.id, id))
       .run();
 
-    const after = this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord);
+    const after = this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord, user);
     const diff = options.changes ?? this.diff(def, before, next);
     if (diff.length) {
       this.audit.log(options.actor ?? user, {
@@ -243,6 +348,74 @@ export class RecordsService {
       });
     }
     return after;
+  }
+
+  private sameValue(left: unknown, right: unknown): boolean {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  }
+
+  private finalStatus(entityKey: string, status: string): boolean {
+    const workflowKey = ENTITY_WORKFLOW_KEY[entityKey] ?? entityKey;
+    const workflow = (WORKFLOWS as Record<string, { statuses?: { key: string; final?: boolean }[] }>)[workflowKey];
+    return !!workflow?.statuses?.find((item) => item.key === status)?.final;
+  }
+
+  /** Reject status changes that are only allowed through approve/decision endpoints. */
+  private guardCreate(def: EntityDef, data: Record<string, unknown>, options: CreateOptions): void {
+    if (options.system || def.key !== 'vehicleBookings') return;
+    const status = String(data['status'] ?? '');
+    if (status && status !== 'รออนุมัติ') {
+      bad('ไม่สามารถกำหนดสถานะการจองรถได้โดยตรง กรุณาส่งคำขออนุมัติ');
+    }
+  }
+
+  private guardUpdate(
+    def: EntityDef,
+    row: RawRecord,
+    patch: Record<string, unknown>,
+    user: SafeUser,
+    options: UpdateOptions,
+  ): void {
+    if (options.system) return;
+    const currentStatus = String(row.data['status'] ?? '');
+    const changed = (key: string) => Object.prototype.hasOwnProperty.call(patch, key) && !this.sameValue(patch[key], row.data[key]);
+
+    if (def.key === 'projects' && row.data['closed'] === true) {
+      bad('โครงการนี้ปิดแล้ว กรุณาเปิดโครงการใหม่ก่อนแก้ไข');
+    }
+    if (FINAL_LOCKED_ENTITIES.has(def.key) && this.finalStatus(def.key, currentStatus)) {
+      bad('รายการนี้อยู่ในสถานะปิด/จบแล้ว ไม่สามารถแก้ไขได้');
+    }
+    if (def.key === 'purchaseOrders' && PO_LOCKED_STATUSES.includes(currentStatus)) {
+      const locked = PO_LOCKED_FIELDS.find((key) => changed(key));
+      if (locked) bad('ใบสั่งซื้อนี้ถูกสั่งซื้อ/รับของแล้ว ไม่สามารถแก้ไขรายการหลักได้');
+    }
+    if (def.key === 'serials') {
+      if (changed('status') || changed('warehouse')) {
+        bad('สถานะ/คลังของ Serial ต้องเปลี่ยนผ่านรายการรับเข้า-เบิกออกเท่านั้น');
+      }
+    }
+    const assignFields = ASSIGN_FIELDS[def.key];
+    if (assignFields?.some((key) => changed(key))) {
+      this.access.require(user, def.resource, 'assign');
+    }
+    if (def.key === 'vehicleBookings') {
+      if (changed('status')) {
+        const nextStatus = String(patch['status'] ?? '');
+        if (nextStatus !== currentStatus && !['ยกเลิก', 'เสร็จสิ้น'].includes(nextStatus)) {
+          bad('ไม่สามารถเปลี่ยนสถานะการจองรถได้โดยตรง กรุณาใช้ขั้นตอนอนุมัติ');
+        }
+      }
+      if (currentStatus === 'อนุมัติแล้ว' && ['vehicle', 'startAt', 'endAt'].some((key) => changed(key))) {
+        const requestedStatus = String(patch['status'] ?? currentStatus);
+        if (!['ยกเลิก', 'เสร็จสิ้น'].includes(requestedStatus)) {
+          patch['status'] = 'รออนุมัติ';
+        }
+      }
+      if (['เสร็จสิ้น', 'ยกเลิก', 'ไม่อนุมัติ'].includes(currentStatus) && ['vehicle', 'startAt', 'endAt'].some((key) => changed(key))) {
+        bad('รายการจองที่ปิด/ยกเลิกแล้วไม่สามารถเปลี่ยนรถหรือช่วงเวลาได้');
+      }
+    }
   }
 
   /** Internal write for workflow/system fields (status, timeline, steps) — skips field whitelist. */
@@ -282,7 +455,7 @@ export class RecordsService {
       summary,
       payload: { changes: changes.slice(0, 20) },
     });
-    return this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord);
+    return this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord, actor ?? undefined);
   }
 
   transition(
@@ -372,7 +545,7 @@ export class RecordsService {
           .slice(0, 20)
           .map((row) => {
             const refField = other.fields.find((item) => item.type === 'ref' && item.ref && row.data[item.key]);
-            const refTitle = refField ? this.labelOf(refField.ref ?? '', String(row.data[refField.key] ?? '')) : '';
+            const refTitle = refField ? this.labelOf(refField.ref ?? '', String(row.data[refField.key] ?? ''), user) : '';
             const rawTitle =
               other.title === 'code'
                 ? refTitle && !refTitle.startsWith('(') ? refTitle : row.code
@@ -404,7 +577,7 @@ export class RecordsService {
       .set({ deleted: true, deletedAt: now, deletedBy: user.id, deletedReason: reason.trim(), updatedAt: now, updatedBy: user.id })
       .where(eq(records.id, id))
       .run();
-    const decorated = this.decorate(def, { ...row, deleted: true, deletedAt: now, deletedReason: reason.trim() } as RawRecord);
+    const decorated = this.decorate(def, { ...row, deleted: true, deletedAt: now, deletedReason: reason.trim() } as RawRecord, user);
     this.audit.log(user, {
       action: 'archive',
       entity: def.key,
@@ -435,7 +608,7 @@ export class RecordsService {
       .set({ deleted: false, deletedAt: null, deletedBy: null, deletedReason: null, updatedAt: now, updatedBy: user.id })
       .where(eq(records.id, id))
       .run();
-    const decorated = this.decorate(def, { ...row, deleted: false, deletedAt: null, deletedReason: null } as RawRecord);
+    const decorated = this.decorate(def, { ...row, deleted: false, deletedAt: null, deletedReason: null } as RawRecord, user);
     this.audit.log(user, {
       action: 'restore',
       entity: def.key,
@@ -460,42 +633,46 @@ export class RecordsService {
       const row = this.db.select().from(users).where(eq(users.id, id)).all()[0];
       return !!row && row.active;
     }
-    const def = getEntity(entityKey);
+    const def = findEntity(entityKey);
     if (!def) return false;
     const row = this.rawGet(entityKey, id);
     if (!row || row.deleted) return false;
     return !user || this.access.canSee(user, def, row);
   }
 
-  labelOf(entityKey: string, id: string): string {
+  labelOf(entityKey: string, id: string, user?: SafeUser): string {
     if (entityKey === 'users') {
-      const user = this.db.select().from(users).where(eq(users.id, id)).all()[0];
-      return user?.name ?? '(ไม่พบ)';
+      const userRow = this.db.select().from(users).where(eq(users.id, id)).all()[0];
+      return userRow?.name ?? '(ไม่พบ)';
     }
-    const def = getEntity(entityKey);
+    const def = findEntity(entityKey);
     if (!def) return '(ไม่พบ)';
     const row = this.rawGet(entityKey, id);
     if (!row) return '(ไม่พบ)';
+    if (user && !this.access.canSee(user, def, row)) return '(ไม่มีสิทธิ์)';
     if (def.title === 'code' || !row.data[def.title]) return row.code;
     return String(row.data[def.title]);
   }
 
   // ---------- decoration / defaults ----------
 
-  private decorate(def: EntityDef, row: RawRecord): DecoratedRecord {
+  private decorate(def: EntityDef, row: RawRecord, user?: SafeUser): DecoratedRecord {
     const data = { ...row.data };
+    for (const field of def.fields) {
+      if (field.sensitive) delete data[field.key];
+    }
     const labels: Record<string, string> = {};
     const rowLabels: Record<string, Array<Record<string, string>>> = {};
     for (const field of def.fields) {
       if (field.type === 'ref' && typeof data[field.key] === 'string' && data[field.key]) {
-        labels[field.key] = this.labelOf(field.ref ?? '', data[field.key] as string);
+        labels[field.key] = this.labelOf(field.ref ?? '', data[field.key] as string, user);
       }
       if (field.type === 'rows' && Array.isArray(data[field.key])) {
         rowLabels[field.key] = (data[field.key] as Record<string, unknown>[]).map((line) => {
           const map: Record<string, string> = {};
           for (const col of field.cols ?? []) {
             if (col.type === 'ref' && typeof line[col.key] === 'string' && line[col.key]) {
-              map[col.key] = this.labelOf(col.ref ?? '', line[col.key] as string);
+              map[col.key] = this.labelOf(col.ref ?? '', line[col.key] as string, user);
             }
           }
           return map;
@@ -532,6 +709,8 @@ export class RecordsService {
     if (def.key === 'items') return { trackSerial: false };
     if (def.key === 'pmPlans') return { active: true };
     if (def.key === 'serials') return { status: 'ในคลัง' };
+    if (def.key === 'vehicles') return { status: 'พร้อมใช้' };
+    if (def.key === 'vehicleBookings') return { status: 'รออนุมัติ' };
     const workflowKey = ENTITY_WORKFLOW_KEY[def.key] ?? def.key;
     const workflow = (WORKFLOWS as Record<string, { statuses?: { key: string; enabled?: boolean }[] }>)[workflowKey];
     if (workflow?.statuses?.length) {
@@ -619,6 +798,35 @@ export class RecordsService {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : 0;
     };
+    if (def.key === 'vehicleBookings') {
+      const vehicleId = String(data['vehicle'] ?? '');
+      const start = Date.parse(String(data['startAt'] ?? ''));
+      const end = Date.parse(String(data['endAt'] ?? ''));
+      const status = String(data['status'] ?? '');
+      if (Number.isFinite(start) && Number.isFinite(end) && end <= start) {
+        bad('เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม');
+      }
+      if (vehicleId && Number.isFinite(start) && Number.isFinite(end) && !['ยกเลิก', 'ไม่อนุมัติ', 'เสร็จสิ้น'].includes(status)) {
+        const vehicle = this.rawGet('vehicles', vehicleId);
+        if (vehicle && String(vehicle.data['status'] ?? '') && String(vehicle.data['status']) !== 'พร้อมใช้') {
+          bad('รถคันนี้ไม่พร้อมใช้งาน');
+        }
+        const conflict = this.db
+          .select()
+          .from(records)
+          .where(eq(records.entity, 'vehicleBookings'))
+          .all()
+          .find((row) => {
+            if (row.deleted || row.id === selfId) return false;
+            if (String(row.data['vehicle'] ?? '') !== vehicleId) return false;
+            if (['ยกเลิก', 'ไม่อนุมัติ'].includes(String(row.data['status'] ?? ''))) return false;
+            const otherStart = Date.parse(String(row.data['startAt'] ?? ''));
+            const otherEnd = Date.parse(String(row.data['endAt'] ?? ''));
+            return Number.isFinite(otherStart) && Number.isFinite(otherEnd) && otherStart < end && otherEnd > start;
+          });
+        if (conflict) bad(`ช่วงเวลานี้รถถูกจองแล้ว (${conflict.code})`);
+      }
+    }
     if (def.key === 'invoices') {
       const subtotal = number(data['subtotal']);
       const vat = number(data['vat']);
@@ -749,7 +957,7 @@ export class RecordsService {
         const site = this.rawGet('sites', siteId);
         const siteCustomer = site?.data['customer'];
         if (siteCustomer && siteCustomer !== customerId) {
-          errors['site'] = `ไซต์ที่เลือกไม่ได้อยู่ในลูกค้ารายนี้ (ลูกค้าของไซต์: ${this.labelOf('customers', String(siteCustomer))})`;
+          errors['site'] = `ไซต์ที่เลือกไม่ได้อยู่ในลูกค้ารายนี้ (ลูกค้าของไซต์: ${this.labelOf('customers', String(siteCustomer), user)})`;
         }
       }
     }

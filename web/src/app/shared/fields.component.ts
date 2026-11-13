@@ -18,36 +18,41 @@ import type { FieldDef, Option } from '../core/models';
         @if (field.help) { <div class="muted small" style="margin-top:-3px">{{ field.help }}</div> }
         @switch (field.type) {
           @case ('textarea') {
-            <textarea [id]="'f-' + field.key" rows="3" [value]="asText(value)" [disabled]="disabled" (input)="emitText($event)"></textarea>
+            <textarea [id]="'f-' + field.key" rows="3" [value]="asText(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (input)="emitText($event)"></textarea>
           }
           @case ('number') {
             <div class="with-suffix">
-              <input [id]="'f-' + field.key" type="number" inputMode="decimal" step="any" [value]="asText(value)" [disabled]="disabled" (input)="emitText($event)" />
+              <input [id]="'f-' + field.key" type="number" inputMode="decimal" step="any" [value]="asText(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (input)="emitText($event)" />
               @if (field.suffix) { <span>{{ field.suffix }}</span> }
             </div>
           }
           @case ('date') {
-            <input [id]="'f-' + field.key" type="date" [value]="asText(value)" [disabled]="disabled" (input)="emitText($event)" />
+            <input [id]="'f-' + field.key" type="date" [value]="asText(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (input)="emitText($event)" />
           }
           @case ('datetime') {
-            <input [id]="'f-' + field.key" type="datetime-local" [value]="toLocal(value)" [disabled]="disabled" (input)="emitDateTime($event)" />
+            <input [id]="'f-' + field.key" type="datetime-local" [value]="toLocal(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (input)="emitDateTime($event)" />
           }
           @case ('select') {
-            <select [id]="'f-' + field.key" [value]="asText(value)" [disabled]="disabled" (change)="emitText($event)">
+            <select [id]="'f-' + field.key" [value]="asText(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (change)="emitText($event)">
               <option value="" [selected]="!asText(value)">– เลือก –</option>
               @for (option of options; track option.value) { <option [value]="option.value" [selected]="option.value === asText(value)">{{ option.label }}</option> }
               @if (value && !hasOption(asText(value))) { <option [value]="asText(value)" [selected]="true">{{ asText(value) }} (ค่าเดิม)</option> }
             </select>
           }
           @case ('ref') {
-            <select [id]="'f-' + field.key" [value]="asText(value)" [disabled]="disabled" (change)="emitText($event)">
+            <select [id]="'f-' + field.key" [value]="asText(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (change)="emitText($event)">
               <option value="" [selected]="!asText(value)">– เลือก –</option>
               @for (option of options; track option.value) { <option [value]="option.value" [selected]="option.value === asText(value)">{{ option.label }}</option> }
               @if (value && !hasOption(asText(value))) { <option [value]="asText(value)" [selected]="true">(ไม่พบ/ไม่มีสิทธิ์ดู)</option> }
             </select>
+            @if (!disabled && !options.length) {
+              <div class="muted small field-hint">
+                ยังไม่มีข้อมูล{{ refLabel() ? ' “' + refLabel() + '”' : '' }} ให้เลือก — เพิ่ม{{ refLabel() ? 'ที่เมนู “' + refLabel() + '” ก่อน' : 'ข้อมูลหลักก่อน' }} แล้วกลับมาเลือก
+              </div>
+            }
           }
           @case ('boolean') {
-            <label class="check"><input [id]="'f-' + field.key" type="checkbox" [checked]="!!value" [disabled]="disabled" (change)="emitBoolean($event)" /> ใช่</label>
+            <label class="check"><input [id]="'f-' + field.key" type="checkbox" [checked]="!!value" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" (change)="emitBoolean($event)" /> ใช่</label>
           }
           @case ('multiselect') {
             <div class="row">
@@ -60,7 +65,7 @@ import type { FieldDef, Option } from '../core/models';
             <div>
               <div class="file-row">
                 <label class="btn sm file-pick">
-                  <input [id]="'f-' + field.key" type="file" multiple [disabled]="disabled || uploading" (change)="addFiles($event)" />
+                  <input [id]="'f-' + field.key" type="file" multiple [disabled]="disabled || uploading" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" (change)="addFiles($event)" />
                   {{ uploading ? 'กำลังอัปโหลด…' : 'แนบไฟล์' }}
                 </label>
               </div>
@@ -81,28 +86,28 @@ import type { FieldDef, Option } from '../core/models';
             <div class="rows-input">
               <div class="table-wrap">
                 <table class="mini">
-                  <thead><tr>@for (col of field.cols; track col.key) { <th>{{ col.label }}@if (col.required) {<b class="req"> *</b>}</th> }<th></th></tr></thead>
+                  <thead><tr>@for (col of field.cols; track col.key) { <th scope="col">{{ col.label }}@if (col.required) {<b class="req"> *</b>}</th> }<th scope="col"><span class="sr-only">จัดการ</span></th></tr></thead>
                   <tbody>
-                    @for (line of asRows(value); track $index) {
+                    @for (line of asRows(value); track $index; let rowIndex = $index) {
                       <tr>
                         @for (col of field.cols; track col.key) {
-                          <td>
+                          <td [attr.data-label]="col.label">
                             @if (col.type === 'select') {
-                              <select [value]="asText(line[col.key])" [disabled]="disabled" (change)="setRow($index, col.key, $any($event.target).value)">
+                              <select [value]="asText(line[col.key])" [disabled]="disabled" (change)="setRow(rowIndex, col.key, $any($event.target).value)">
                                 <option value="" [selected]="!asText(line[col.key])">–</option>
                                 @for (option of col.options ?? []; track option) { <option [value]="option" [selected]="option === asText(line[col.key])">{{ option }}</option> }
                               </select>
                             } @else if (col.type === 'ref') {
-                              <select [value]="asText(line[col.key])" [disabled]="disabled" (change)="setRow($index, col.key, $any($event.target).value)">
+                              <select [value]="asText(line[col.key])" [disabled]="disabled" (change)="setRow(rowIndex, col.key, $any($event.target).value)">
                                 <option value="" [selected]="!asText(line[col.key])">–</option>
                                 @for (option of rowOptions[col.key] ?? []; track option.value) { <option [value]="option.value" [selected]="option.value === asText(line[col.key])">{{ option.label }}</option> }
                               </select>
                             } @else {
-                              <input [type]="col.type === 'number' ? 'number' : 'text'" [value]="asText(line[col.key])" [disabled]="disabled" (input)="setRow($index, col.key, $any($event.target).value)" />
+                              <input [type]="col.type === 'number' ? 'number' : 'text'" [value]="asText(line[col.key])" [disabled]="disabled" (input)="setRow(rowIndex, col.key, $any($event.target).value)" />
                             }
                           </td>
                         }
-                        <td>@if (!disabled) { <button type="button" class="btn ghost sm" (click)="removeRow($index)" aria-label="ลบแถว">ลบ</button> }</td>
+                        <td class="row-action">@if (!disabled) { <button type="button" class="btn ghost sm" (click)="removeRow(rowIndex)" aria-label="ลบแถว">ลบ</button> }</td>
                       </tr>
                     }
                   </tbody>
@@ -112,10 +117,10 @@ import type { FieldDef, Option } from '../core/models';
             </div>
           }
           @default {
-            <input [id]="'f-' + field.key" [type]="field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'" [value]="asText(value)" [disabled]="disabled" (input)="emitText($event)" />
+            <input [id]="'f-' + field.key" [type]="field.type === 'email' ? 'email' : field.type === 'phone' ? 'tel' : 'text'" [value]="asText(value)" [disabled]="disabled" [attr.aria-invalid]="error ? 'true' : null" [attr.aria-describedby]="error ? 'err-' + field.key : null" [attr.aria-required]="field.required ? 'true' : null" (input)="emitText($event)" />
           }
         }
-        @if (error) { <div class="err">{{ error }}</div> }
+        @if (error) { <div class="err" [id]="'err-' + field.key" role="alert">{{ error }}</div> }
       </div>
     }
   `,
@@ -132,11 +137,18 @@ export class FieldComponent {
 
   private readonly fileService = inject(FileService);
   private readonly toast = inject(ToastService);
+  private readonly meta = inject(MetaService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   readonly Math = Math;
   readonly toLocal = toLocalInput;
   uploading = false;
+
+  refLabel(): string {
+    const key = this.field?.ref;
+    if (!key) return '';
+    return this.meta.entity(key)?.label ?? '';
+  }
 
   isWide(): boolean {
     return ['textarea', 'rows', 'file', 'multiselect'].includes(this.field.type) || !!this.field.wide;
@@ -254,6 +266,7 @@ export class DynamicFieldsComponent implements OnChanges {
   @Output() valuesChange = new EventEmitter<Record<string, unknown>>();
 
   readonly options = new Map<string, Option[]>();
+  private latest: Record<string, unknown> = {};
 
   constructor(
     private readonly meta: MetaService,
@@ -261,6 +274,7 @@ export class DynamicFieldsComponent implements OnChanges {
   ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['values']) this.latest = this.values ?? {};
     if (changes['fields'] || changes['lists']) this.loadOptions();
   }
 
@@ -271,7 +285,10 @@ export class DynamicFieldsComponent implements OnChanges {
   }
 
   set(key: string, value: unknown): void {
-    this.valuesChange.emit({ ...this.values, [key]: value });
+    // Merge into the latest local copy so several fields changed in one tick
+    // (paste, automation, fast tabbing) do not overwrite each other.
+    this.latest = { ...this.latest, [key]: value };
+    this.valuesChange.emit(this.latest);
   }
 
   optionsFor(field: FieldDef): Option[] {

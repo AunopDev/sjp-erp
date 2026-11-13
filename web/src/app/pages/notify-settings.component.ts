@@ -59,12 +59,12 @@ const EMPTY: NotifyConfig = {
         <div class="notify-card">
           <div class="row"><h4>อีเมล (SMTP)</h4><span class="grow"></span><label class="check"><input type="checkbox" [checked]="config().emailEnabled" (change)="set('emailEnabled', $any($event.target).checked)" /> เปิดใช้งาน</label></div>
           <div class="form-grid">
-            <div class="field"><label>SMTP Host</label><input [value]="config().smtpHost" (input)="set('smtpHost', $any($event.target).value)" placeholder="smtp.example.com" /></div>
-            <div class="field"><label>Port</label><input type="number" [value]="config().smtpPort" (input)="set('smtpPort', +$any($event.target).value)" /></div>
-            <div class="field"><label>ผู้ใช้ SMTP</label><input [value]="config().smtpUser" (input)="set('smtpUser', $any($event.target).value)" /></div>
-            <div class="field"><label>รหัสผ่าน {{ config().smtpPassSet ? '(ตั้งไว้แล้ว)' : '' }}</label><input type="password" [value]="config().smtpPass" (input)="set('smtpPass', $any($event.target).value)" placeholder="เว้นว่างเพื่อใช้ค่าเดิม" /></div>
-            <div class="field"><label>จาก (From)</label><input [value]="config().mailFrom" (input)="set('mailFrom', $any($event.target).value)" placeholder="SJP ERP &lt;no-reply@example.com&gt;" /></div>
-            <div class="field"><label>ถึง (คั่นด้วย , หรือ ;)</label><input [value]="config().mailTo" (input)="set('mailTo', $any($event.target).value)" placeholder="ops@example.com" /></div>
+            <div class="field"><label for="lf-notify-settings-component-1">SMTP Host</label><input id="lf-notify-settings-component-1" [value]="config().smtpHost" (input)="set('smtpHost', $any($event.target).value)" placeholder="smtp.example.com" /></div>
+            <div class="field"><label for="lf-notify-settings-component-2">Port</label><input id="lf-notify-settings-component-2" type="number" [value]="config().smtpPort" (input)="set('smtpPort', +$any($event.target).value)" /></div>
+            <div class="field"><label for="lf-notify-settings-component-3">ผู้ใช้ SMTP</label><input id="lf-notify-settings-component-3" [value]="config().smtpUser" (input)="set('smtpUser', $any($event.target).value)" /></div>
+            <div class="field"><label for="lf-notify-settings-component-4">รหัสผ่าน {{ config().smtpPassSet ? '(ตั้งไว้แล้ว)' : '' }}</label><input id="lf-notify-settings-component-4" type="password" [value]="config().smtpPass" (input)="set('smtpPass', $any($event.target).value)" placeholder="เว้นว่างเพื่อใช้ค่าเดิม" /></div>
+            <div class="field"><label for="lf-notify-settings-component-5">จาก (From)</label><input id="lf-notify-settings-component-5" [value]="config().mailFrom" (input)="set('mailFrom', $any($event.target).value)" placeholder="SJP ERP &lt;no-reply@example.com&gt;" /></div>
+            <div class="field"><label for="lf-notify-settings-component-6">ถึง (คั่นด้วย , หรือ ;)</label><input id="lf-notify-settings-component-6" [value]="config().mailTo" (input)="set('mailTo', $any($event.target).value)" placeholder="ops@example.com" /></div>
             <label class="check"><input type="checkbox" [checked]="config().smtpSecure" (change)="set('smtpSecure', $any($event.target).checked)" /> ใช้ TLS/SSL (port 465)</label>
           </div>
           @if (config().envFallback?.smtp) { <div class="muted small" style="margin-top:6px">มีการตั้งค่า SMTP ผ่าน environment และจะถูกใช้เมื่อช่องว่าง</div> }
@@ -74,8 +74,8 @@ const EMPTY: NotifyConfig = {
         <div class="notify-card">
           <div class="row"><h4>LINE Messaging API</h4><span class="grow"></span><label class="check"><input type="checkbox" [checked]="config().lineEnabled" (change)="set('lineEnabled', $any($event.target).checked)" /> เปิดใช้งาน</label></div>
           <div class="form-grid">
-            <div class="field wide"><label>Channel Access Token {{ config().lineTokenSet ? '(ตั้งไว้แล้ว)' : '' }}</label><input type="password" [value]="config().lineToken" (input)="set('lineToken', $any($event.target).value)" placeholder="เว้นว่างเพื่อใช้ค่าเดิม" /></div>
-            <div class="field wide"><label>ปลายทาง (User/Group ID)</label><input [value]="config().lineTo" (input)="set('lineTo', $any($event.target).value)" placeholder="Uxxxxxxxx..." /></div>
+            <div class="field wide"><label for="lf-notify-settings-component-7">Channel Access Token {{ config().lineTokenSet ? '(ตั้งไว้แล้ว)' : '' }}</label><input id="lf-notify-settings-component-7" type="password" [value]="config().lineToken" (input)="set('lineToken', $any($event.target).value)" placeholder="เว้นว่างเพื่อใช้ค่าเดิม" /></div>
+            <div class="field wide"><label for="lf-notify-settings-component-8">ปลายทาง (User/Group ID)</label><input id="lf-notify-settings-component-8" [value]="config().lineTo" (input)="set('lineTo', $any($event.target).value)" placeholder="Uxxxxxxxx..." /></div>
           </div>
           @if (config().envFallback?.line) { <div class="muted small" style="margin-top:6px">มีการตั้งค่า LINE token ผ่าน environment และจะถูกใช้เมื่อช่องว่าง</div> }
           <button type="button" class="btn sm" style="margin-top:10px" [disabled]="testing() !== ''" (click)="test('line')">{{ testing() === 'line' ? 'กำลังส่ง…' : 'ส่ง LINE ทดสอบ' }}</button>

@@ -18,6 +18,7 @@ import type { FieldDef, RecordRow } from '../core/models';
           entityLabel="Service Ticket"
           title="เปิดเคสใหม่"
           createUrl="/tickets"
+          [inline]="true"
           [fields]="fields()"
           [lists]="meta.lists()"
           [defaults]="defaults"

@@ -40,7 +40,7 @@ export class SearchService {
     for (const def of Object.values(ENTITY_DEFS)) {
       if (!this.access.canEntity(user, def.key, 'view')) continue;
       const batch: SearchResult[] = [];
-      for (const row of this.records.rawScoped(def, user)) {
+      for (const row of this.records.rawScoped(def, user).slice(0, 5000)) {
         const code = row.code.toLowerCase();
         const titleValue = this.titleValue(def, row.data);
         const title = String(titleValue ?? '').toLowerCase();
@@ -69,7 +69,7 @@ export class SearchService {
           id: row.id,
           code: row.code,
           title: String(titleValue || row.code),
-          subtitle: this.subtitle(def, row.data),
+          subtitle: this.subtitle(def, row.data, user),
           link: this.link(def.key, row.id),
           score,
         });
@@ -92,12 +92,12 @@ export class SearchService {
     return fallback ? data[fallback.key] : undefined;
   }
 
-  private subtitle(def: EntityDef, data: Record<string, unknown>): string {
+  private subtitle(def: EntityDef, data: Record<string, unknown>, user: SafeUser): string {
     const parts: string[] = [def.label];
     for (const key of REF_LABELS) {
       const value = data[key];
       if (typeof value === 'string' && value) {
-        const label = this.records.labelOf((def.fields.find((field) => field.key === key)?.ref) ?? 'users', value);
+        const label = this.records.labelOf((def.fields.find((field) => field.key === key)?.ref) ?? 'users', value, user);
         if (label && !label.startsWith('(')) {
           parts.push(label);
           break;

@@ -22,7 +22,7 @@ import type { EntityDef, FieldDef, ListResponse, RecordRow } from '../core/model
           <div><h1>{{ entity.label }}</h1><div class="muted">{{ rows().length }} รายการ</div></div>
           <div class="page-actions">
             @if (auth.can(entity.resource, 'create')) {
-              <button type="button" class="btn primary" (click)="formOpen.set(true)">+ เพิ่ม{{ entity.label }}</button>
+              <button type="button" class="btn primary" [title]="'เพิ่ม' + entity.label" (click)="formOpen.set(true)">+ {{ addLabel() }}</button>
             }
           </div>
         </div>
@@ -34,9 +34,11 @@ import type { EntityDef, FieldDef, ListResponse, RecordRow } from '../core/model
           [canExport]="auth.can(entity.resource, 'export')"
           [emptyText]="'ยังไม่มี' + entity.label"
           [emptyActionLabel]="auth.can(entity.resource, 'create') ? '+ เพิ่มรายการแรก' : ''"
+          [error]="loadError()"
           [rowClass]="rowClass"
           (rowClick)="open($event)"
           (emptyAction)="formOpen.set(true)"
+          (retry)="load()"
         />
       </div>
       @if (formOpen()) {
@@ -67,21 +69,41 @@ export class EntityListComponent implements OnInit {
   private readonly toast = inject(ToastService);
 
   readonly rows = signal<RecordRow[]>([]);
+  readonly loadError = signal('');
   readonly formOpen = signal(false);
   readonly filters = signal<FilterDef[]>([]);
+  private readonly newRequested = signal(false);
   readonly def = computed(() => this.meta.entity(this.route.snapshot.paramMap.get('entity') ?? ''));
   readonly lists = computed(() => this.meta.lists());
+  readonly addLabel = computed(() => {
+    const label = this.def()?.label ?? '';
+    return label.length + 5 > 16 ? 'เพิ่มรายการ' : `เพิ่ม${label}`;
+  });
   readonly fmtDate = fmtDate;
   readonly fmtDateTime = fmtDateTime;
   readonly rowClass = () => '';
 
   constructor() {
+    this.route.queryParamMap.subscribe((params) => {
+      if (params.get('new') !== '1') return;
+      this.newRequested.set(true);
+      this.tryOpenNew();
+    });
     effect(() => {
       if (this.meta.meta()) {
         this.load();
         this.buildFilters();
+        this.tryOpenNew();
       }
     });
+  }
+
+  private tryOpenNew(): void {
+    const entity = this.def();
+    if (!this.newRequested() || !entity || !this.auth.can(entity.resource, 'create')) return;
+    this.formOpen.set(true);
+    this.newRequested.set(false);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: {}, replaceUrl: true });
   }
 
   ngOnInit(): void {
@@ -91,9 +113,14 @@ export class EntityListComponent implements OnInit {
   load(): void {
     const entity = this.def();
     if (!entity) return;
+    this.loadError.set('');
     this.api.get<ListResponse<RecordRow>>(`/records/${entity.key}`, { pageSize: 500 }).subscribe({
       next: (result) => this.rows.set(result.items),
-      error: (error: unknown) => this.toast.error(apiErrorMessage(error)),
+      error: (error: unknown) => {
+        const message = apiErrorMessage(error);
+        this.loadError.set(message);
+        this.toast.error(message);
+      },
     });
   }
 

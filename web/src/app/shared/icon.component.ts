@@ -34,6 +34,7 @@ const PATHS: Record<string, string> = {
   chevron: 'M9 6l6 6-6 6',
   close: 'M6 6l12 12M18 6L6 18',
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
+  copy: 'M9 9h12v12H9zM5 15H3V3h12v2',
   upload: 'M12 15V3M7 8l5-5 5 5M4 21h16',
   menu: 'M4 6h16M4 12h16M4 18h16',
 };

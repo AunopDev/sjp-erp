@@ -12,6 +12,7 @@ interface CompanyInfo {
   email: string;
   website: string;
   footerNote: string;
+  governmentBidThreshold: number;
 }
 
 const EMPTY: CompanyInfo = {
@@ -23,6 +24,7 @@ const EMPTY: CompanyInfo = {
   email: '',
   website: '',
   footerNote: '',
+  governmentBidThreshold: 500_000,
 };
 
 @Component({
@@ -48,6 +50,11 @@ const EMPTY: CompanyInfo = {
         <div class="field"><label for="lf-company-settings-component-6">เว็บไซต์</label><input id="lf-company-settings-component-6" [value]="company().website" (input)="set('website', $any($event.target).value)" /></div>
         <div class="field wide"><label for="lf-company-settings-component-7">ที่อยู่</label><textarea id="lf-company-settings-component-7" rows="3" [value]="company().address" (input)="set('address', $any($event.target).value)"></textarea></div>
         <div class="field wide"><label for="lf-company-settings-component-8">หมายเหตุท้ายเอกสาร (เช่น เงื่อนไขชำระ)</label><textarea id="lf-company-settings-component-8" rows="3" [value]="company().footerNote" (input)="set('footerNote', $any($event.target).value)"></textarea></div>
+        <div class="field">
+          <label for="lf-company-settings-component-9">เกณฑ์มูลค่า defended ICT (บาท)</label>
+          <input id="lf-company-settings-component-9" type="number" min="0" [value]="company().governmentBidThreshold" (input)="set('governmentBidThreshold', +$any($event.target).value)" />
+          <div class="muted small" style="margin-top:4px">โครงการราชการที่มูลค่าเกินเกณฑ์นี้ต้องบันทึกผล defended ICT = ผ่าน ก่อนจบขั้นเสนอ</div>
+        </div>
       </div>
       @if (message()) { <div class="notice" [class.bad]="error()" style="margin-top:12px">{{ message() }}</div> }
     </div>

@@ -85,19 +85,37 @@ export function diffDays(a: string, b: string): number {
   return Math.round((new Date(`${b}T00:00:00.000Z`).getTime() - new Date(`${a}T00:00:00.000Z`).getTime()) / 86400000);
 }
 
-const TH_DATE: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
-const TH_DATETIME: Intl.DateTimeFormatOptions = { ...TH_DATE, hour: '2-digit', minute: '2-digit' };
+type ThaiDateParts = { day: string; month: string; year: number; hour: string; minute: string };
+
+function thaiDateParts(value: unknown, timeZone: string): ThaiDateParts | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+  return {
+    day: get('day'),
+    month: get('month'),
+    year: Number(get('year')) + 543,
+    hour: get('hour'),
+    minute: get('minute'),
+  };
+}
 
 export function fmtThaiDate(value: unknown, timeZone = process.env.APP_TIMEZONE || DEFAULT_TIMEZONE): string {
-  if (!value) return '–';
-  const date = value instanceof Date ? value : new Date(String(value));
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat('th-TH', { ...TH_DATE, timeZone }).format(date);
+  const parts = thaiDateParts(value, timeZone);
+  return parts ? `${parts.day}/${parts.month}/${parts.year}` : value ? String(value) : '–';
 }
 
 export function fmtThaiDateTime(value: unknown, timeZone = process.env.APP_TIMEZONE || DEFAULT_TIMEZONE): string {
-  if (!value) return '–';
-  const date = value instanceof Date ? value : new Date(String(value));
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat('th-TH', { ...TH_DATETIME, timeZone }).format(date);
+  const parts = thaiDateParts(value, timeZone);
+  return parts ? `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}` : value ? String(value) : '–';
 }

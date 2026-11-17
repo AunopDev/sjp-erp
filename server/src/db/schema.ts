@@ -115,6 +115,20 @@ export const webhookDeliveries = sqliteTable('webhook_deliveries', {
   deliveredAt: text('delivered_at'),
 });
 
+export const notifyQueue = sqliteTable('notify_queue', {
+  id: text('id').primaryKey(),
+  channel: text('channel').notNull(),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  nextAt: text('next_at').notNull(),
+  lastError: text('last_error').notNull().default(''),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  sentAt: text('sent_at'),
+});
+
 export const files = sqliteTable('files', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),

@@ -5,7 +5,17 @@ import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, EventEmi
   standalone: true,
   template: `
     <div class="modal-back" (mousedown)="onBackdrop($event)">
-      <div #dialog class="modal" [class.wide]="wide" role="dialog" aria-modal="true" tabindex="-1" [attr.aria-label]="title">
+      <div #dialog class="modal" [class.wide]="wide" role="dialog" aria-modal="true" tabindex="-1" [attr.aria-label]="title"
+        (pointerup)="endDrag()"
+        (pointercancel)="endDrag()">
+        <div
+          class="modal-grip"
+          aria-hidden="true"
+          (pointerdown)="startDrag($event)"
+          (pointermove)="moveDrag($event)"
+          (pointerup)="endDrag()"
+          (pointercancel)="endDrag()"
+        ></div>
         <div class="modal-head">
           <h3>{{ title }}</h3>
           <button type="button" class="btn ghost" (click)="closed.emit()" aria-label="ปิด">ปิด</button>
@@ -25,6 +35,8 @@ export class ModalComponent implements AfterViewInit, OnDestroy {
   private readonly host = inject(ElementRef) as ElementRef<HTMLElement>;
   private dialog: HTMLElement | null = null;
   private previousFocus: HTMLElement | null = null;
+  private dragStartY: number | null = null;
+  private dragOffset = 0;
 
   ngAfterViewInit(): void {
     this.dialog = this.host.nativeElement.querySelector('.modal') as HTMLElement | null;
@@ -40,6 +52,41 @@ export class ModalComponent implements AfterViewInit, OnDestroy {
 
   onBackdrop(event: MouseEvent): void {
     if (event.target === event.currentTarget) this.closed.emit();
+  }
+
+  /** Only the ≤760px layout is a bottom sheet, and only there can it be dragged. */
+  private sheetMode(): boolean {
+    return typeof window !== 'undefined' && window.innerWidth <= 760;
+  }
+
+  startDrag(event: PointerEvent): void {
+    if (!this.sheetMode()) return;
+    this.dragStartY = event.clientY;
+    this.dragOffset = 0;
+    const target = event.currentTarget as HTMLElement | null;
+    target?.setPointerCapture?.(event.pointerId);
+    this.dialog?.classList.add('dragging');
+  }
+
+  moveDrag(event: PointerEvent): void {
+    if (this.dragStartY === null || !this.dialog) return;
+    this.dragOffset = Math.max(0, event.clientY - this.dragStartY);
+    this.dialog.style.transform = `translateY(${this.dragOffset}px)`;
+  }
+
+  endDrag(): void {
+    if (this.dragStartY === null) return;
+    const shouldClose = this.dragOffset > 96;
+    this.dragStartY = null;
+    this.dragOffset = 0;
+    const dialog = this.dialog;
+    if (!dialog) return;
+    dialog.classList.remove('dragging');
+    if (shouldClose) {
+      this.closed.emit();
+      return;
+    }
+    dialog.style.transform = '';
   }
 
   @HostListener('document:keydown', ['$event'])

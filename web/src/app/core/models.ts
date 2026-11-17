@@ -118,6 +118,8 @@ export interface ApprovalRow {
 export interface StepDoc {
   key: string;
   label: string;
+  required?: boolean;
+  signoff?: boolean;
 }
 
 export interface ProjectStepDef {
@@ -134,12 +136,19 @@ export interface ProjectStepDef {
   source?: string;
 }
 
+export interface WorkflowDef {
+  confirmed?: boolean;
+  statuses?: WorkflowStatus[];
+  steps?: ProjectStepDef[];
+  limits?: unknown[];
+}
+
 export interface MetaResponse {
   entities: Record<string, EntityDef>;
-  workflows: {
-    ticket: { confirmed: boolean; statuses: WorkflowStatus[] };
-    po: { confirmed: boolean; statuses: WorkflowStatus[]; limits: unknown[] };
-    project: { confirmed: boolean; steps: ProjectStepDef[] };
+  workflows: Record<string, WorkflowDef> & {
+    ticket: WorkflowDef & { confirmed: boolean; statuses: WorkflowStatus[] };
+    po: WorkflowDef & { confirmed: boolean; statuses: WorkflowStatus[]; limits: unknown[] };
+    project: WorkflowDef & { confirmed: boolean; steps: ProjectStepDef[] };
   };
   lists: { teams: string[]; depts: string[] };
   resources: Record<string, string>;

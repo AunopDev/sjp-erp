@@ -36,21 +36,44 @@ export const readCookie = (name: string): string => {
   }
 };
 
-export const readTheme = (): 'dark' | 'light' => {
+/** `system` follows the OS preference; the other two are explicit choices. */
+export type ThemePref = 'light' | 'dark' | 'system';
+export type ResolvedTheme = 'light' | 'dark';
+
+export const readThemePref = (): ThemePref => {
   try {
-    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+    const stored = localStorage.getItem(THEME_KEY);
+    return stored === 'light' || stored === 'dark' ? stored : 'system';
   } catch {
-    return 'dark';
+    return 'system';
   }
 };
 
-export const writeTheme = (theme: 'dark' | 'light'): void => {
+export const writeThemePref = (pref: ThemePref): void => {
   try {
-    localStorage.setItem(THEME_KEY, theme);
+    if (pref === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, pref);
   } catch {
     /* ignore */
   }
 };
+
+export const systemPrefersDark = (): boolean => {
+  try {
+    return typeof globalThis.matchMedia === 'function' && globalThis.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return true;
+  }
+};
+
+export const resolveTheme = (pref: ThemePref = readThemePref()): ResolvedTheme =>
+  pref === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : pref;
+
+/** Resolved theme for code that only needs the theme currently painted. */
+export const readTheme = (): ResolvedTheme => resolveTheme();
+
+/** Kept for explicit light/dark writes; clears the `system` override. */
+export const writeTheme = (theme: ResolvedTheme): void => writeThemePref(theme);
 
 export const readSidebarCollapsed = (): boolean => {
   try {
@@ -115,6 +138,36 @@ export const writeDensity = (density: Density): void => {
     localStorage.setItem(DENSITY_KEY, density);
   } catch {
     /* storage can be disabled */
+  }
+};
+
+const DETAIL_NAV_PREFIX = 'sjp-detail-nav-';
+
+/**
+ * Remembers the visible order of a list (session-scoped) so the record detail
+ * page can offer previous/next without another round trip.
+ */
+export const writeDetailNav = (key: string, ids: string[]): void => {
+  try {
+    sessionStorage.setItem(DETAIL_NAV_PREFIX + key, JSON.stringify({ ids, at: Date.now() }));
+  } catch {
+    /* storage can be disabled */
+  }
+};
+
+export const readDetailNav = (key: string, maxAgeMs = 30 * 60_000): string[] | null => {
+  try {
+    const raw = sessionStorage.getItem(DETAIL_NAV_PREFIX + key);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const value = parsed as { ids?: unknown; at?: unknown };
+    if (!Array.isArray(value.ids) || typeof value.at !== 'number') return null;
+    if (Date.now() - value.at > maxAgeMs) return null;
+    const ids = value.ids.filter((id): id is string => typeof id === 'string');
+    return ids.length ? ids : null;
+  } catch {
+    return null;
   }
 };
 

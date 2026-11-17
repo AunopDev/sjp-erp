@@ -1,7 +1,7 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
 import { events, records, type JsonObject } from '../db/schema.js';
 import type { SafeUser } from '../auth/user.types.js';
@@ -66,23 +66,33 @@ export class EventsService {
 
   list(user: SafeUser, filter: EventFilter = {}) {
     const limit = Math.max(1, Math.min(Number(filter.limit) || 100, 500));
-    let rows = this.db.select().from(events).all();
     if (filter.entity) {
       const def = this.access.requireEntity(user, filter.entity, 'view');
       const byId = new Map(
         this.db.select().from(records).where(eq(records.entity, filter.entity)).all().map((row) => [row.id, row]),
       );
-      rows = rows.filter((event) => {
-        if (event.entity !== filter.entity) return false;
-        if (!event.recordId) return user.isAdmin || !def.scoped;
-        const record = byId.get(event.recordId);
-        return !!record && this.access.canSee(user, def, record);
-      });
-    } else {
-      this.access.require(user, 'settings', 'view');
+      const rows = this.db
+        .select()
+        .from(events)
+        .where(eq(events.entity, filter.entity))
+        .orderBy(desc(events.at))
+        .all()
+        .filter((event) => {
+          if (filter.type && event.type !== filter.type) return false;
+          if (!event.recordId) return user.isAdmin || !def.scoped;
+          const record = byId.get(event.recordId);
+          return !!record && this.access.canSee(user, def, record);
+        });
+      return rows.slice(0, limit);
     }
-    if (filter.type) rows = rows.filter((row) => row.type === filter.type);
-    return rows.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
+    this.access.require(user, 'settings', 'view');
+    return this.db
+      .select()
+      .from(events)
+      .where(filter.type ? and(eq(events.type, filter.type)) : undefined)
+      .orderBy(desc(events.at))
+      .limit(limit)
+      .all();
   }
 
   types(): string[] {

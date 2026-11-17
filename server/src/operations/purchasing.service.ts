@@ -19,12 +19,16 @@ export class PurchasingService {
 
   list(user: SafeUser) {
     this.access.require(user, 'purchase', 'view');
-    return this.records.all(user, 'purchaseOrders').map((po) => ({
-      ...po,
-      amount: this.amount(po),
-      receivedMap: this.received(String(po.id)),
-      pct: this.progress(po, this.received(String(po.id))),
-    }));
+    const receivedByPo = this.receivedByPo();
+    return this.records.all(user, 'purchaseOrders').map((po) => {
+      const got = receivedByPo.get(String(po.id)) ?? {};
+      return {
+        ...po,
+        amount: this.amount(po),
+        receivedMap: got,
+        pct: this.progress(po, got),
+      };
+    });
   }
 
   detail(user: SafeUser, id: string) {
@@ -62,11 +66,20 @@ export class PurchasingService {
   }
 
   received(poId: string): Record<string, number> {
-    const out: Record<string, number> = {};
+    return this.receivedByPo().get(poId) ?? {};
+  }
+
+  /** Load stock moves once and group by PO, so list() does not scan them per PO. */
+  private receivedByPo(): Map<string, Record<string, number>> {
+    const out = new Map<string, Record<string, number>>();
     for (const move of this.records.rawAll('stockMoves')) {
-      if (String(move.data['po'] ?? '') !== poId || move.data['type'] !== 'receive') continue;
+      if (move.data['type'] !== 'receive') continue;
+      const poId = String(move.data['po'] ?? '');
+      if (!poId) continue;
       const item = String(move.data['item'] ?? '');
-      out[item] = (out[item] ?? 0) + Number(move.data['qty'] ?? 0);
+      const byItem = out.get(poId) ?? {};
+      byItem[item] = (byItem[item] ?? 0) + Number(move.data['qty'] ?? 0);
+      out.set(poId, byItem);
     }
     return out;
   }
@@ -84,7 +97,7 @@ export class PurchasingService {
       bad(`ไม่สามารถเปลี่ยนจาก "${from.label}" เป็น "${target.label}"`);
     }
     if (target.needClosePerm) this.access.require(user, 'purchase', 'close');
-    if (to === 'ordered' && !(Array.isArray(rec['lines']) && (rec['lines'] as unknown[]).length)) {
+    if (to === 'ordered' && !(Array.isArray(rec['lines']) && rec['lines'].length)) {
       bad('ใบสั่งซื้อต้องมีรายการ');
     }
     if (to === 'ordered' && this.amount(rec) <= 0) bad('มูลค่าใบสั่งซื้อต้องมากกว่า 0');

@@ -58,7 +58,7 @@ export class MetaService {
   workflowFor(entity: EntityDef | string): WorkflowStatus[] {
     const def = typeof entity === 'string' ? this.entity(entity) : entity;
     const key = def?.workflowKey ?? (typeof entity === 'string' ? entity : entity.key);
-    const workflows = this.meta()?.workflows as unknown as Record<string, { statuses?: WorkflowStatus[] }> | undefined;
+    const workflows = this.meta()?.workflows;
     const workflow = workflows?.[key];
     return workflow?.statuses ?? [];
   }

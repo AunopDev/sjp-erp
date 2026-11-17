@@ -60,7 +60,7 @@ Font: IBM Plex Sans Thai (already bundled). Line-height 1.5 for Thai; never clip
 - Top bar: 56px sticky, breadcrumb left, search `min(340px,30vw)` before quick create, utilities right.
 - Content: max 1600px, 20–24px padding.
 - Tables: full width, sticky header, 11.5px header labels, 13px cells, row hover `--card-2`.
-- Modals: max 640/960px, radius 10, footer actions right.
+- Modals: max 640/960px, radius 10, footer actions right. On ≤760px they dock to the bottom as a sheet (radius 16 top, grab handle, `90dvh` cap, safe-area padding) and the handle supports drag-to-dismiss (release past 96px).
 - Mobile: drawer `min(86vw,340px)`, bottom nav 56px + safe area.
 
 ## Components
@@ -72,17 +72,28 @@ Font: IBM Plex Sans Thai (already bundled). Line-height 1.5 for Thai; never clip
 - **Tabs**: 13px, 2px underline, scroll horizontally on narrow screens.
 - **Empty/loading**: `app-state`; 28px padding, 12.5px message, dashed empty container.
 - **Settings**: vertical grouped sub-nav on desktop, horizontally scrollable chips on mobile; 3 groups instead of 10 flat tabs.
-- **Table tools**: search, filters, saved views (`sjp-views-<table>`), column chooser (`sjp-cols-<table>`), CSV export.
+- **Table tools**: search, filters, saved views (`sjp-views-<table>`), column chooser (`sjp-cols-<table>`), copy filtered rows as TSV, CSV export.
 - **Density**: `compact` (default) / `comfy` via the user menu, persisted in `sjp-density` and applied as `html[data-density]`.
+- **Theme**: `ตามเครื่อง` (default, follows `prefers-color-scheme`) / `สว่าง` / `มืด` via the user menu or `/account`, persisted in `sjp-theme`. `public/theme-init.js` resolves it before Angular boots and keeps `meta[theme-color]` + `meta[color-scheme]` in sync.
+- **Account (`/account`)**: every signed-in user can see their own profile, appearance controls and a grouped permission summary (`สิทธิ์ของฉัน`) with counts; editing identity fields stays with admins.
+- **User menu**: account link, module switcher (favourites first, otherwise one entry per module group, max 5), theme/density controls, sign out.
+- **Record detail**: tabbed (`ข้อมูล` / `รายการที่เชื่อมโยง (n)` / `ประวัติการแก้ไข (n)`), definition list shows `field.help` under the value; on ≤760px a touch swipe moves between tabs (ignores tables, tabs and form controls). The header shows `‹ n/total ›` to walk the list order the user came from (session-scoped, 30 min) — same control on tickets and projects.
+- **Project government track**: choosing `track = ราชการ (ประมูล)` shows a gate card (value vs threshold, defended ICT, NT/MOU, revenue share) and blocks closing steps 3/5 until the gate is satisfied; the threshold lives in Settings → ข้อมูลบริษัท.
+- **Step documents**: each doc can be `required` and/or `signoff`; attachments carry signer name/role/date/version (inline editor), the step shows what is missing, and the complete button stays disabled until docs and sign-offs are present.
+- **Touch**: interactive controls use `touch-action: manipulation`; the mobile drawer closes on a left swipe.
+- **Popovers**: desktop anchored panels; ≤700px they are clamped to the viewport width and height with internal scroll.
 - **Favorites**: drag to reorder on desktop; order is persisted and reused by the mobile shortcut bar.
 
 ## Dashboard structure
 
 1. Header (kicker, title, subtitle, secondary actions)
-2. 6 KPI cells in a single bordered strip
-3. Work queue + activity (1.65fr / 1fr)
-4. Finance strip (4 cells)
-5. 4 compact bar panels
+2. Focus strip — items that need a decision today (urgent tickets, approvals, overdue PM/invoices, pending expenses, low stock) as chips, or one calm line when nothing is pending
+3. 6 KPI cells in a single bordered strip
+4. Work queue + activity (1.65fr / 1fr)
+5. Finance strip (4 cells)
+6. 4 compact bar panels
+
+The header carries an `อัปเดต HH:mm:ss` stamp plus a refresh button that reloads silently and keeps the current numbers on screen. While the page is visible it also refreshes itself every 60 s (and once when the tab regains focus); background failures stay quiet.
 
 ## Rules
 
@@ -95,4 +106,4 @@ Font: IBM Plex Sans Thai (already bundled). Line-height 1.5 for Thai; never clip
 
 ## Implementation note
 
-The legacy CSS is layered over several design iterations. New work appends to the final "SJP ENTERPRISE UI v3" section at the end of `web/src/styles.css`; do not patch older blocks. New sidebar classes use the `sb-` prefix and quick create uses `qc-`.
+The legacy CSS is layered over several design iterations. New work appends to the final "SJP ENTERPRISE UI v4" section at the end of `web/src/styles.css`; do not patch older blocks. New sidebar classes use the `sb-` prefix and quick create uses `qc-`.

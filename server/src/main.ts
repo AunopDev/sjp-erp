@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
@@ -47,7 +47,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
-  console.log(`SJP ERP API listening on http://localhost:${port}/api`);
+  new Logger('Bootstrap').log(`SJP ERP API listening on http://localhost:${port}/api`);
 }
 
 await bootstrap();

@@ -4,8 +4,9 @@ import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { FileService, type StoredFile } from '../core/file.service';
 import { MetaService } from '../core/meta.service';
+import { readDetailNav } from '../core/storage';
 import { PdfService } from '../core/pdf.service';
-import { displayValue, fmtDate, fmtDateTime } from '../core/util';
+import { displayValue, fmtDate, fmtDateTime, horizontalSwipe, listNeighbours } from '../core/util';
 import { RecordFormComponent } from '../shared/record-form.component';
 import { StateComponent } from '../shared/state.component';
 import { ToastService } from '../shared/toast.service';
@@ -17,6 +18,8 @@ interface RelatedGroup {
   field: string;
   records: { id: string; code: string; title: string }[];
 }
+
+type DetailTab = 'info' | 'related' | 'audit';
 
 const SPECIAL_ROUTES: Record<string, string> = {
   tickets: '/tickets',
@@ -40,6 +43,13 @@ const SPECIAL_ROUTES: Record<string, string> = {
             </div>
             <div class="page-actions">
               <button type="button" class="btn" (click)="back()">‹ กลับ</button>
+              @if (nav(); as position) {
+                <div class="nav-pair" role="group" aria-label="เลื่อนไประหว่างรายการ">
+                  <button type="button" class="btn nav-step" [disabled]="!position.prev" (click)="goSibling(position.prev)" aria-label="รายการก่อนหน้า">‹</button>
+                  <span class="nav-count">{{ position.index + 1 }}/{{ position.total }}</span>
+                  <button type="button" class="btn nav-step" [disabled]="!position.next" (click)="goSibling(position.next)" aria-label="รายการถัดไป">›</button>
+                </div>
+              }
               <button type="button" class="btn" (click)="printPage()">พิมพ์</button>
               <button type="button" class="btn" (click)="downloadPdf()">ดาวน์โหลด PDF</button>
               @if (auth.can(entity.resource, 'edit') && !row._deleted) { <button type="button" class="btn primary" (click)="editOpen.set(true)">แก้ไข</button> }
@@ -56,10 +66,26 @@ const SPECIAL_ROUTES: Record<string, string> = {
               }
             </div>
           }
-          <div class="tabs">
-            <button type="button" [class.active]="tab() === 'info'" (click)="tab.set('info')">ข้อมูล</button>
-            <button type="button" [class.active]="tab() === 'audit'" (click)="tab.set('audit')">ประวัติการแก้ไข</button>
+          <div class="tabs" role="tablist" aria-label="ส่วนของข้อมูล" (keydown)="tabKey($event)">
+            <button type="button" role="tab" id="tab-info" aria-controls="detail-tabpanel" [attr.aria-selected]="tab() === 'info'" [class.active]="tab() === 'info'" (click)="tab.set('info')">ข้อมูล</button>
+            @if (relatedCount()) {
+              <button type="button" role="tab" id="tab-related" aria-controls="detail-tabpanel" [attr.aria-selected]="tab() === 'related'" [class.active]="tab() === 'related'" (click)="tab.set('related')">
+                รายการที่เชื่อมโยง <span class="tab-count">{{ relatedCount() }}</span>
+              </button>
+            }
+            <button type="button" role="tab" id="tab-audit" aria-controls="detail-tabpanel" [attr.aria-selected]="tab() === 'audit'" [class.active]="tab() === 'audit'" (click)="tab.set('audit')">
+              ประวัติการแก้ไข @if (audit().length) { <span class="tab-count">{{ audit().length }}</span> }
+            </button>
           </div>
+          <div
+            class="tab-panels"
+            id="detail-tabpanel"
+            role="tabpanel"
+            [attr.aria-labelledby]="'tab-' + tab()"
+            (pointerdown)="onSwipeStart($event)"
+            (pointerup)="onSwipeEnd($event)"
+            (pointercancel)="onSwipeCancel()"
+          >
           @if (tab() === 'info') {
             @if (workflowStatuses().length) {
               <div class="card">
@@ -98,34 +124,35 @@ const SPECIAL_ROUTES: Record<string, string> = {
                     } @else {
                       {{ display(field, row) }}
                     }
+                    @if (field.help) { <div class="kv-help">{{ field.help }}</div> }
                   </div></div>
                 }
               }
               <div class="kv"><div class="k">สร้างโดย</div><div class="v">{{ row._createdByName || '–' }} · {{ fmtDateTime(row._createdAt) }}</div></div>
               <div class="kv"><div class="k">แก้ไขล่าสุด</div><div class="v">{{ row._updatedByName || '–' }} · {{ fmtDateTime(row._updatedAt) }}</div></div>
             </div>
-            @if (related().length) {
-              <div class="card">
-                <h3>รายการที่เชื่อมโยง</h3>
-                @for (group of related(); track group.entity + group.field) {
-                  <div class="related-group">
-                    <div class="related-title">{{ group.label }} · {{ group.field }}</div>
-                    @for (item of group.records; track item.id) {
-                      <a class="list-row" [routerLink]="relatedLink(group.entity, item.id)">
-                        <span class="mono muted">{{ item.code }}</span>
-                        <span class="lr-main"><b>{{ item.title }}</b></span>
-                        <span class="lr-age">›</span>
-                      </a>
-                    }
-                  </div>
-                }
-              </div>
-            }
             @if (entity.key === 'serials' && asArray(row['history']).length) {
               <div class="card"><h3>ประวัติ Serial</h3>
                 @for (item of asArray(row['history']).slice().reverse(); track item['id']) { <div style="padding:4px 0">{{ item['text'] }} <span class="muted small">· {{ fmtDateTime(item['at']) }}</span></div> }
               </div>
             }
+          }
+          @if (tab() === 'related') {
+            <div class="card">
+              <h3>รายการที่เชื่อมโยง</h3>
+              @for (group of related(); track group.entity + group.field) {
+                <div class="related-group">
+                  <div class="related-title">{{ group.label }} · {{ group.field }}</div>
+                  @for (item of group.records; track item.id) {
+                    <a class="list-row" [routerLink]="relatedLink(group.entity, item.id)">
+                      <span class="mono muted">{{ item.code }}</span>
+                      <span class="lr-main"><b>{{ item.title }}</b></span>
+                      <span class="lr-age">›</span>
+                    </a>
+                  }
+                </div>
+              }
+            </div>
           }
           @if (tab() === 'audit') {
             <div class="card">
@@ -135,6 +162,7 @@ const SPECIAL_ROUTES: Record<string, string> = {
               } }
             </div>
           }
+          </div>
         </div>
         @if (editOpen()) {
           <app-record-form
@@ -172,14 +200,25 @@ export class EntityDetailComponent implements OnInit {
   readonly related = signal<RelatedGroup[]>([]);
   readonly loading = signal(true);
   readonly editOpen = signal(false);
-  readonly tab = signal<'info' | 'audit'>('info');
+  readonly tab = signal<DetailTab>('info');
   readonly statusTo = signal('');
   readonly statusComment = signal('');
   readonly statusBusy = signal(false);
+  readonly nav = signal<{ index: number; total: number; prev: string; next: string } | null>(null);
+  private swipeFrom: { x: number; y: number } | null = null;
+  private inFlightKey = '';
+  private loadedKey = '';
   readonly fmtDateTime = fmtDateTime;
   readonly def = computed(() => this.meta.entity(this.route.snapshot.paramMap.get('entity') ?? ''));
   readonly lists = computed(() => this.meta.lists());
   readonly visibleFields = computed(() => (this.def()?.fields ?? []).filter((field) => !field.hidden));
+  readonly relatedCount = computed(() => this.related().reduce((total, group) => total + group.records.length, 0));
+  readonly availableTabs = computed<DetailTab[]>(() => {
+    const tabs: DetailTab[] = ['info'];
+    if (this.relatedCount()) tabs.push('related');
+    tabs.push('audit');
+    return tabs;
+  });
   readonly workflowStatuses = computed<WorkflowStatus[]>(() => {
     const def = this.def();
     const key = def?.workflowKey ?? def?.key;
@@ -206,15 +245,33 @@ export class EntityDetailComponent implements OnInit {
 
   ngOnInit(): void {
     this.meta.load();
+    // The same component instance is reused when moving between records.
+    this.route.paramMap.subscribe(() => {
+      const id = this.route.snapshot.paramMap.get('id') ?? '';
+      if (!this.meta.meta() || this.loadedKey.endsWith(`:${id}`)) return;
+      this.record.set(null);
+      this.related.set([]);
+      this.audit.set([]);
+      this.pendingApprovals.set([]);
+      this.loading.set(true);
+      this.tab.set('info');
+      this.load();
+    });
   }
 
-  load(): void {
+  load(force = false): void {
     const entity = this.def();
     const id = this.route.snapshot.paramMap.get('id');
     if (!entity || !id) return;
+    const key = `${entity.key}:${id}`;
+    if (!force && (this.inFlightKey === key || this.loadedKey === key)) return;
+    this.inFlightKey = key;
     this.api.get<RecordRow>(`/records/${entity.key}/${id}`).subscribe({
       next: (row) => {
+        this.inFlightKey = '';
+        this.loadedKey = key;
         this.record.set(row);
+        this.nav.set(listNeighbours(readDetailNav(entity.key), id));
         this.statusTo.set(this.statusOptions()[0]?.key ?? '');
         this.loading.set(false);
         this.api.get<ApprovalRow[]>(`/records/${entity.key}/${id}/approvals`).subscribe({
@@ -231,10 +288,18 @@ export class EntityDetailComponent implements OnInit {
         });
       },
       error: (error: unknown) => {
+        this.inFlightKey = '';
         this.loading.set(false);
         this.toast.error(apiErrorMessage(error));
       },
     });
+  }
+
+  /** Previous/next inside the list order the user was just looking at. */
+  goSibling(id: string): void {
+    const entity = this.def();
+    if (!entity || !id) return;
+    void this.router.navigate(['/entities', entity.key, id]);
   }
 
   label(row: RecordRow): string {
@@ -245,6 +310,46 @@ export class EntityDetailComponent implements OnInit {
   relatedLink(entity: string, id: string): string {
     const base = SPECIAL_ROUTES[entity];
     return base ? `${base}/${id}` : `/entities/${entity}/${id}`;
+  }
+
+  /** Touch-only page swipe: left → next tab, right → previous tab. */
+  onSwipeStart(event: PointerEvent): void {
+    if (typeof window === 'undefined' || window.innerWidth > 760) return;
+    if (event.pointerType === 'mouse') return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('.table-wrap, .tabs, a, input, select, textarea')) return;
+    this.swipeFrom = { x: event.clientX, y: event.clientY };
+  }
+
+  onSwipeEnd(event: PointerEvent): void {
+    const from = this.swipeFrom;
+    this.swipeFrom = null;
+    if (!from) return;
+    const direction = horizontalSwipe(event.clientX - from.x, event.clientY - from.y);
+    if (!direction) return;
+    const tabs = this.availableTabs();
+    const index = tabs.indexOf(this.tab());
+    const next = tabs[direction === 'left' ? index + 1 : index - 1];
+    if (next) this.tab.set(next);
+  }
+
+  onSwipeCancel(): void {
+    this.swipeFrom = null;
+  }
+
+  /** ARIA tabs pattern: ←/→ cycle, Home/End jump, focus follows selection. */
+  tabKey(event: KeyboardEvent): void {
+    const tabs = this.availableTabs();
+    const index = tabs.indexOf(this.tab());
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    this.tab.set(tabs[next]);
+    document.getElementById(`tab-${tabs[next]}`)?.focus();
   }
 
   display(field: FieldDef, row: RecordRow): string {
@@ -289,7 +394,7 @@ export class EntityDetailComponent implements OnInit {
   onSaved(record: RecordRow): void {
     this.record.set(record);
     this.editOpen.set(false);
-    this.load();
+    this.load(true);
   }
 
   setStatusTo(value: string): void {
@@ -324,7 +429,7 @@ export class EntityDetailComponent implements OnInit {
         this.record.set(updated);
         this.statusTo.set(this.statusOptions()[0]?.key ?? '');
         this.toast.show(updated['_pendingApproval'] ? 'ส่งคำขออนุมัติแล้ว — รอผู้อนุมัติพิจารณา' : 'เปลี่ยนสถานะแล้ว');
-        this.load();
+        this.load(true);
       },
       error: (error: unknown) => {
         this.statusBusy.set(false);

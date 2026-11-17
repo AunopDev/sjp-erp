@@ -43,36 +43,39 @@ export function isoFromLocalInput(value: string): string {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
-const dateFmt = new Intl.DateTimeFormat('th-TH-u-ca-gregory', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-});
-
-const dateTimeFmt = new Intl.DateTimeFormat('th-TH-u-ca-gregory', {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
 const numFmt = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 2 });
 
-export function fmtDate(value: unknown): string {
-  if (!value) return '–';
+type DateLang = 'th' | 'en';
+
+function dateParts(value: unknown): { day: string; month: string; year: number; hour: string; minute: string } | null {
+  if (!value) return null;
   const text = displayValue(value);
-  if (text === '–') return text;
+  if (text === '–') return null;
   const date = /^\d{4}-\d{2}-\d{2}$/.test(text) ? new Date(`${text}T00:00:00`) : new Date(text);
-  return Number.isNaN(date.getTime()) ? text : dateFmt.format(date);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    day: String(date.getDate()).padStart(2, '0'),
+    month: String(date.getMonth() + 1).padStart(2, '0'),
+    year: date.getFullYear(),
+    hour: String(date.getHours()).padStart(2, '0'),
+    minute: String(date.getMinutes()).padStart(2, '0'),
+  };
 }
 
-export function fmtDateTime(value: unknown): string {
-  if (!value) return '–';
-  const text = displayValue(value);
-  if (text === '–') return text;
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : dateTimeFmt.format(date);
+/** dd/MM/yyyy — Thai UI uses พ.ศ., English UI uses ค.ศ. */
+export function fmtDate(value: unknown, lang: DateLang = 'th'): string {
+  const parts = dateParts(value);
+  if (!parts) return displayValue(value);
+  const year = lang === 'th' ? parts.year + 543 : parts.year;
+  return `${parts.day}/${parts.month}/${year}`;
+}
+
+/** dd/MM/yyyy HH:mm — Thai UI uses พ.ศ., English UI uses ค.ศ. */
+export function fmtDateTime(value: unknown, lang: DateLang = 'th'): string {
+  const parts = dateParts(value);
+  if (!parts) return displayValue(value);
+  const year = lang === 'th' ? parts.year + 543 : parts.year;
+  return `${parts.day}/${parts.month}/${year} ${parts.hour}:${parts.minute}`;
 }
 
 export function fmtNum(value: unknown): string {
@@ -138,6 +141,66 @@ export function downloadCsv(filename: string, headers: string[], rows: unknown[]
     URL.revokeObjectURL(url);
     a.remove();
   }, 500);
+}
+
+/** Tab-separated text for pasting a filtered table into chat or a spreadsheet. */
+export function toTsv(headers: string[], rows: unknown[][]): string {
+  const cell = (value: unknown): string => {
+    if (value === undefined || value === null || value === '') return '';
+    return displayValue(value).replace(/[\t\r\n]+/g, ' ');
+  };
+  return [headers, ...rows].map((row) => row.map(cell).join('\t')).join('\r\n');
+}
+
+/** Copy text, with a fallback for browsers outside a secure context. */
+export async function copyText(text: string): Promise<boolean> {  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the textarea fallback */
+  }
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detects an intentional horizontal swipe and ignores taps, diagonal drags and
+ * vertical scrolling. `left` means the finger moved towards the start edge.
+ */
+export function horizontalSwipe(dx: number, dy: number, threshold = 60): 'left' | 'right' | null {
+  if (Math.abs(dx) < threshold) return null;
+  if (Math.abs(dx) < Math.abs(dy) * 1.4) return null;
+  return dx < 0 ? 'left' : 'right';
+}
+
+export interface ListNeighbours {
+  index: number;
+  total: number;
+  prev: string;
+  next: string;
+}
+
+/** Position of `id` inside a saved list order, with its previous/next ids. */
+export function listNeighbours(ids: string[] | null, id: string): ListNeighbours | null {
+  if (!ids) return null;
+  const index = ids.indexOf(id);
+  if (index < 0) return null;
+  return { index, total: ids.length, prev: ids[index - 1] ?? '', next: ids[index + 1] ?? '' };
 }
 
 export function addDays(date: string, days: number): string {

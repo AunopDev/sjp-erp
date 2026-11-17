@@ -14,21 +14,19 @@ import { filter } from 'rxjs';
 import { ApiService } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
+import { ThemeService } from '../core/theme.service';
+import { horizontalSwipe } from '../core/util';
 import { ToastService } from '../shared/toast.service';
 import { IconComponent } from '../shared/icon.component';
 import {
-  readDensity,
   readNavClosedGroups,
   readNavFavorites,
   readSidebarCollapsed,
-  readTheme,
-  writeDensity,
   writeNavClosedGroups,
   writeNavFavorites,
   writeSidebarCollapsed,
-  writeTheme,
 } from '../core/storage';
-import type { Density } from '../core/storage';
+import type { ThemePref } from '../core/storage';
 import type { SideNavGroup, SideNavItem } from './side-nav.component';
 import { SideNavComponent } from './side-nav.component';
 import type { QuickCreateAction } from './quick-create.component';
@@ -167,6 +165,11 @@ const DEFAULT_CLOSED_GROUPS = [
 ];
 const MAX_FAVORITES = 6;
 
+/** Pages reachable from the user menu rather than the sidebar. */
+const EXTRA_PAGES: Record<string, { label: string; group: string }> = {
+  '/account': { label: 'บัญชีของฉัน', group: 'ระบบ' },
+};
+
 const normalizeUrl = (url: string): string => url.split('?')[0].split('#')[0];
 
 const matchesPath = (url: string, path: string): boolean => {
@@ -251,7 +254,29 @@ const matchesPath = (url: string, path: string): boolean => {
             @if (userOpen()) {
               <div class="popover right">
                 <div class="pop-title">{{ auth.user()?.name }}<div class="muted small" style="font-weight:400">{{ auth.user()?.roleName }} · {{ auth.user()?.username }}</div></div>
-                <button class="pop-row" type="button" (click)="toggleTheme()"><app-icon [name]="theme() === 'dark' ? 'sun' : 'moon'" /> {{ theme() === 'dark' ? 'ใช้โหมดสว่าง' : 'ใช้โหมดมืด' }}</button>
+                <a class="pop-row" routerLink="/account" (click)="userOpen.set(false)"><app-icon name="user" /> บัญชีของฉัน</a>
+                @if (switcherItems().length) {
+                  <div class="pop-seg-label" id="switch-seg-label">สลับไปที่ · {{ switcherItems().length }}</div>
+                  <div class="app-switch" role="group" aria-labelledby="switch-seg-label">
+                    @for (item of switcherItems(); track item.path) {
+                      <a class="app-chip" [routerLink]="item.path" (click)="userOpen.set(false)">
+                        <app-icon [name]="item.icon" [size]="16" /><span>{{ item.short || item.label }}</span>
+                      </a>
+                    }
+                  </div>
+                }
+                <div class="pop-seg-label" id="theme-seg-label">ธีม</div>
+                <div class="pop-seg" role="group" aria-labelledby="theme-seg-label">
+                  @for (option of themeOptions; track option.value) {
+                    <button
+                      type="button"
+                      class="seg-btn"
+                      [class.on]="themePref() === option.value"
+                      [attr.aria-pressed]="themePref() === option.value"
+                      (click)="setThemePref(option.value)"
+                    >{{ option.label }}</button>
+                  }
+                </div>
                 <button class="pop-row" type="button" (click)="toggleDensity()"><app-icon name="columns" /> ความหนาแน่น: {{ density() === 'compact' ? 'กระชับ' : 'สบาย' }}</button>
                 <button class="pop-row" type="button" (click)="auth.logout()"><app-icon name="logout" /> ออกจากระบบ</button>
               </div>
@@ -273,7 +298,13 @@ const matchesPath = (url: string, path: string): boolean => {
     </div>
 
     @if (menuOpen()) {
-      <div class="overlay sb-drawer-overlay" (mousedown)="onOverlay($event)">
+      <div
+        class="overlay sb-drawer-overlay"
+        (mousedown)="onOverlay($event)"
+        (pointerdown)="drawerSwipeStart($event)"
+        (pointerup)="drawerSwipeEnd($event)"
+        (pointercancel)="drawerSwipeCancel()"
+      >
         <app-side-nav
           class="sb-drawer-host"
           mode="drawer"
@@ -327,6 +358,7 @@ const matchesPath = (url: string, path: string): boolean => {
 export class ShellComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
   private readonly meta = inject(MetaService);
+  private readonly themeService = inject(ThemeService);
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
@@ -338,13 +370,20 @@ export class ShellComponent implements OnInit, OnDestroy {
   readonly paletteIndex = signal(0);
   readonly recordResults = signal<SearchResult[]>([]);
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
-  readonly theme = signal(readTheme());
-  readonly density = signal<Density>(readDensity());
+  readonly themePref = this.themeService.pref;
+  readonly theme = this.themeService.theme;
+  readonly density = this.themeService.density;
+  readonly themeOptions: ReadonlyArray<{ value: ThemePref; label: string }> = [
+    { value: 'system', label: 'ตามเครื่อง' },
+    { value: 'light', label: 'สว่าง' },
+    { value: 'dark', label: 'มืด' },
+  ];
   readonly sidebarCollapsed = signal(readSidebarCollapsed());
   readonly currentUrl = signal(this.router.url);
   readonly pendingApprovals = signal(0);
   readonly notifications = signal<NotificationItem[]>([]);
   readonly notificationsOpen = signal(false);
+  private drawerSwipeFrom: { x: number; y: number } | null = null;
 
   constructor() {
     effect(() => {
@@ -398,6 +437,22 @@ export class ShellComponent implements OnInit, OnDestroy {
     return picked.length ? picked : items.slice(0, 3);
   });
 
+  /** Favourites first, otherwise one entry per module group — the user-menu switcher. */
+  readonly switcherItems = computed<NavItem[]>(() => {
+    const items = this.allNavItems();
+    const favorites = this.favorites()
+      .map((path) => items.find((item) => item.path === path))
+      .filter((item): item is NavItem => !!item);
+    if (favorites.length) return favorites.slice(0, 5);
+    const groups = this.visibleGroups().filter((group) => group.label !== 'ภาพรวม' && group.label !== 'ระบบ');
+    const picked: NavItem[] = [];
+    for (const group of groups) {
+      const item = group.items[0];
+      if (item && !picked.some((existing) => existing.path === item.path)) picked.push(item);
+    }
+    return picked.slice(0, 5);
+  });
+
   readonly quickActions = computed<QuickCreateAction[]>(() =>
     QUICK_ACTIONS.filter((action) => this.auth.can(action.resource ?? '', 'create')),
   );
@@ -445,6 +500,8 @@ export class ShellComponent implements OnInit, OnDestroy {
 
   readonly pageInfo = computed(() => {
     const url = this.currentUrl().split('?')[0];
+    const extra = EXTRA_PAGES[url];
+    if (extra) return extra;
     const items = this.allItems();
     const hit = items
       .filter((item) => (item.path === '/' ? url === '/' : url.startsWith(item.path)))
@@ -455,8 +512,6 @@ export class ShellComponent implements OnInit, OnDestroy {
   readonly initials = computed(() => (this.auth.user()?.name ?? '?').trim().charAt(0));
 
   ngOnInit(): void {
-    document.documentElement.dataset['theme'] = this.theme();
-    document.documentElement.dataset['density'] = this.density();
     this.meta.load();
     this.loadApprovals();
     this.loadNotifications();
@@ -482,18 +537,17 @@ export class ShellComponent implements OnInit, OnDestroy {
     if (this.searchTimer) clearTimeout(this.searchTimer);
   }
 
+  /** Explicit light/dark; the sidebar switch keeps its one-tap behaviour. */
   toggleTheme(): void {
-    const next = this.theme() === 'dark' ? 'light' : 'dark';
-    this.theme.set(next);
-    document.documentElement.dataset['theme'] = next;
-    writeTheme(next);
+    this.themeService.toggle();
+  }
+
+  setThemePref(pref: ThemePref): void {
+    this.themeService.setPref(pref);
   }
 
   toggleDensity(): void {
-    const next: Density = this.density() === 'compact' ? 'comfy' : 'compact';
-    this.density.set(next);
-    document.documentElement.dataset['density'] = next;
-    writeDensity(next);
+    this.themeService.toggleDensity();
   }
 
   toggleSidebar(): void {
@@ -510,6 +564,23 @@ export class ShellComponent implements OnInit, OnDestroy {
   closeMenu(): void {
     this.menuOpen.set(false);
     document.body.classList.remove('sb-lock');
+  }
+
+  /** Swipe the drawer to the left to dismiss it (touch only). */
+  drawerSwipeStart(event: PointerEvent): void {
+    if (event.pointerType === 'mouse') return;
+    this.drawerSwipeFrom = { x: event.clientX, y: event.clientY };
+  }
+
+  drawerSwipeEnd(event: PointerEvent): void {
+    const from = this.drawerSwipeFrom;
+    this.drawerSwipeFrom = null;
+    if (!from) return;
+    if (horizontalSwipe(event.clientX - from.x, event.clientY - from.y) === 'left') this.closeMenu();
+  }
+
+  drawerSwipeCancel(): void {
+    this.drawerSwipeFrom = null;
   }
 
   toggleFavorite(path: string): void {

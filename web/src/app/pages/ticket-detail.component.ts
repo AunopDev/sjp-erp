@@ -4,7 +4,8 @@ import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
 import { PdfService } from '../core/pdf.service';
-import { ageHours, fmtDate, fmtDateTime, fmtDuration, todayStr } from '../core/util';
+import { readDetailNav } from '../core/storage';
+import { ageHours, fmtDate, fmtDateTime, fmtDuration, listNeighbours, todayStr } from '../core/util';
 import { FieldComponent } from '../shared/fields.component';
 import { IconComponent } from '../shared/icon.component';
 import { RecordFormComponent } from '../shared/record-form.component';
@@ -24,6 +25,13 @@ const SLA_HOURS: Record<string, number> = { เร่งด่วน: 4, สู�
           <div><h1>{{ ticket['title'] }}</h1><div class="muted">{{ ticket.code }} · เปิดเมื่อ {{ fmtDateTime(ticket['receivedAt']) }}</div></div>
           <div class="page-actions">
             <button type="button" class="btn" (click)="back()">‹ รายการ</button>
+            @if (nav(); as position) {
+              <div class="nav-pair" role="group" aria-label="เลื่อนไประหว่างเคส">
+                <button type="button" class="btn nav-step" [disabled]="!position.prev" (click)="goSibling(position.prev)" aria-label="เคสก่อนหน้า">‹</button>
+                <span class="nav-count">{{ position.index + 1 }}/{{ position.total }}</span>
+                <button type="button" class="btn nav-step" [disabled]="!position.next" (click)="goSibling(position.next)" aria-label="เคสถัดไป">›</button>
+              </div>
+            }
             <button type="button" class="btn" (click)="printPage()">พิมพ์</button>
             <button type="button" class="btn" (click)="downloadPdf()">ดาวน์โหลด PDF</button>
             @if (auth.can('tickets', 'edit')) { <button type="button" class="btn" (click)="editOpen.set(true)">แก้ไขข้อมูล</button> }
@@ -61,7 +69,7 @@ const SLA_HOURS: Record<string, number> = { เร่งด่วน: 4, สู�
         @if (tab() === 'info') {
           <div class="detail-layout">
             <div class="card">
-              @for (field of visibleFields(); track field.key) { <div class="kv"><div class="k">{{ field.label }}</div><div class="v">{{ display(field, ticket) }}</div></div> }
+              @for (field of visibleFields(); track field.key) { <div class="kv"><div class="k">{{ field.label }}</div><div class="v">{{ display(field, ticket) }}@if (field.help) { <div class="kv-help">{{ field.help }}</div> }</div></div> }
             </div>
             <div class="card no-print action-panel">
               <h3>เปลี่ยนสถานะ</h3>
@@ -157,6 +165,7 @@ export class TicketDetailComponent implements OnInit {
   readonly record = signal<RecordRow | null>(null);
   readonly audit = signal<Record<string, unknown>[]>([]);
   readonly loading = signal(true);
+  readonly nav = signal<{ index: number; total: number; prev: string; next: string } | null>(null);
   readonly tab = signal<'info' | 'timeline' | 'visit' | 'audit'>('info');
   readonly editOpen = signal(false);
   readonly statusTo = signal('');
@@ -237,7 +246,15 @@ export class TicketDetailComponent implements OnInit {
       next: (users) => this.users.set(users),
       error: () => this.users.set([]),
     });
-    this.load();
+    // Reused when moving between tickets: reset and reload on the new id.
+    this.route.paramMap.subscribe(() => {
+      this.record.set(null);
+      this.audit.set([]);
+      this.pendingApprovals.set([]);
+      this.loading.set(true);
+      this.tab.set('info');
+      this.load();
+    });
   }
 
   load(): void {
@@ -246,6 +263,7 @@ export class TicketDetailComponent implements OnInit {
     this.api.get<RecordRow>(`/records/tickets/${id}`).subscribe({
       next: (ticket) => {
         this.record.set(ticket);
+        this.nav.set(listNeighbours(readDetailNav('tickets'), id));
         this.loading.set(false);
         this.statusTo.set(this.statusOptions()[0]?.key ?? '');
         this.assignTeam.set(String(ticket['team'] ?? ''));
@@ -412,6 +430,10 @@ export class TicketDetailComponent implements OnInit {
 
   back(): void {
     void this.router.navigate(['/tickets']);
+  }
+
+  goSibling(id: string): void {
+    if (id) void this.router.navigate(['/tickets', id]);
   }
 
   printPage(): void {

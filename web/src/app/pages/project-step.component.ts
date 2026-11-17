@@ -3,15 +3,24 @@ import { Observable, firstValueFrom, of, switchMap } from 'rxjs';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { FileService, type StoredFile } from '../core/file.service';
 import { MetaService } from '../core/meta.service';
-import { fmtDateTime } from '../core/util';
+import { fmtDate, fmtDateTime } from '../core/util';
 import { DynamicFieldsComponent } from '../shared/fields.component';
 import { ToastService } from '../shared/toast.service';
 import type { Option, ProjectStepDef, RecordRow } from '../core/models';
 
+interface DocFile extends StoredFile {
+  at: string;
+  by?: string;
+  signerName?: string;
+  signerRole?: string;
+  signedDate?: string;
+  version?: string;
+}
+
 interface StepData {
   status?: 'pending' | 'doing' | 'done' | 'skipped';
   values?: Record<string, unknown>;
-  docs?: Record<string, (StoredFile & { at: string; by?: string })[]>;
+  docs?: Record<string, DocFile[]>;
   log?: { id: string; at: string; text: string }[];
   plannedDate?: string;
   owner?: string;
@@ -39,14 +48,56 @@ interface StepData {
           <b>เอกสาร{{ step.requireDocs ? ' (บังคับแนบ)' : '' }}</b>
           @for (doc of step.docs; track doc.key) {
             <div class="doc-row">
-              <span class="doc-label">[{{ (docs[doc.key] || []).length ? 'มีไฟล์' : 'ยังไม่แนบ' }}] {{ doc.label }}</span>
-              <span class="small grow doc-files">@for (file of docs[doc.key] || []; track $index) { <span class="file-chip">{{ file.name }} @if (file.id) { <a href="#x" (click)="downloadDoc(file, $event)">ดาวน์โหลด</a> } @if (editable) { <a href="#x" (click)="removeDoc(doc.key, $index, $event)">นำออก</a> }</span> }</span>
-              @if (editable) {
-                <label class="btn sm file-pick" [class.disabled]="uploading">
-                  <input type="file" multiple [disabled]="uploading" (change)="addDocs(doc.key, $event)" />
-                  {{ uploading ? 'กำลังอัปโหลด…' : 'แนบไฟล์' }}
-                </label>
+              <div class="doc-head">
+                <span class="doc-label">
+                  <span class="badge {{ (docs[doc.key] || []).length ? 'green' : (doc.required || step.requireDocs ? 'red' : 'gray') }}">{{ (docs[doc.key] || []).length ? 'มีไฟล์' : 'ยังไม่แนบ' }}</span>
+                  {{ doc.label }}
+                  @if (doc.required || step.requireDocs) { <span class="muted small">· ต้องแนบ</span> }
+                  @if (doc.signoff) { <span class="muted small">· ต้องลงนาม</span> }
+                </span>
+                @if (editable) {
+                  <label class="btn sm file-pick" [class.disabled]="uploading">
+                    <input type="file" multiple [disabled]="uploading" (change)="addDocs(doc.key, $event)" />
+                    {{ uploading ? 'กำลังอัปโหลด…' : 'แนบไฟล์' }}
+                  </label>
+                }
+              </div>
+              @for (file of docs[doc.key] || []; track $index; let i = $index) {
+                <div class="doc-file">
+                  <span class="file-chip">
+                    {{ file.name }}
+                    @if (file.id) { <a href="#x" (click)="downloadDoc(file, $event)">ดาวน์โหลด</a> }
+                    @if (editable) { <a href="#x" (click)="removeDoc(doc.key, i, $event)">นำออก</a> }
+                  </span>
+                  <span class="doc-sign small">
+                    @if (file.signerName || file.signedDate) {
+                      {{ file.signerName || 'ไม่ระบุชื่อ' }} · {{ signerRoleLabel(file.signerRole) }} · {{ file.signedDate ? fmtDate(file.signedDate) : 'ไม่ระบุวันที่' }}@if (file.version) { · v{{ file.version }} }
+                    } @else {
+                      <span class="muted">ยังไม่บันทึกผู้ลงนาม</span>
+                    }
+                  </span>
+                  @if (editable) {
+                    <button type="button" class="btn sm" (click)="toggleSignoff(doc.key, i)">{{ editingSignoff(doc.key, i) ? 'ปิด' : 'ลงนาม' }}</button>
+                  }
+                  @if (editingSignoff(doc.key, i)) {
+                    <div class="signoff-editor">
+                      <input placeholder="ชื่อผู้ลงนาม" [value]="file.signerName || ''" (input)="setSignoff(doc.key, i, 'signerName', $any($event.target).value)" />
+                      <select [value]="file.signerRole || ''" (change)="setSignoff(doc.key, i, 'signerRole', $any($event.target).value)">
+                        <option value="">บทบาท…</option>
+                        @for (role of signerRoles; track role) { <option [value]="role" [selected]="role === file.signerRole">{{ role }}</option> }
+                      </select>
+                      <input type="date" [value]="file.signedDate || ''" (input)="setSignoff(doc.key, i, 'signedDate', $any($event.target).value)" />
+                      <input placeholder="เวอร์ชัน" [value]="file.version || ''" (input)="setSignoff(doc.key, i, 'version', $any($event.target).value)" />
+                    </div>
+                  }
+                </div>
               }
+            </div>
+          }
+          @if (current && (missingDocs.length || missingSignoffs.length)) {
+            <div class="notice warn small" role="status">
+              @if (missingDocs.length) { <div>ยังขาดเอกสาร: {{ missingDocs.join(', ') }}</div> }
+              @if (missingSignoffs.length) { <div>ยังไม่ได้ลงนาม: {{ missingSignoffs.join(', ') }}</div> }
             </div>
           }
           <div class="muted small">ไฟล์จะถูกอัปโหลดและเก็บไว้ในเซิร์ฟเวอร์ (สูงสุด 15 MB ต่อไฟล์)</div>
@@ -63,7 +114,7 @@ interface StepData {
         <div class="form-actions">
           @if (editable) { <button type="button" class="btn" [disabled]="busy" (click)="save()">บันทึกข้อมูลขั้นตอน</button> }
           @if (current && data.status === 'pending') { <button type="button" class="btn" [disabled]="busy" (click)="runAction('start')">เริ่มขั้นตอน</button> }
-          @if (current && (data.status === 'doing' || data.status === 'pending')) { <button type="button" class="btn primary" [disabled]="busy" (click)="runAction('complete')">จบขั้นตอน</button> }
+          @if (current && (data.status === 'doing' || data.status === 'pending')) { <button type="button" class="btn primary" [disabled]="busy || missingDocs.length > 0 || missingSignoffs.length > 0" [title]="missingDocs.length || missingSignoffs.length ? 'ต้องแนบเอกสาร/ลงนามให้ครบก่อน' : ''" (click)="runAction('complete')">จบขั้นตอน</button> }
           @if (current && data.status !== 'done' && data.status !== 'skipped') { <button type="button" class="btn" [disabled]="busy" (click)="skip()">ข้าม</button> }
           @if (data.status === 'done' || data.status === 'skipped') { <button type="button" class="btn" [disabled]="busy" (click)="reopen()">เปิดขั้นตอนใหม่</button> }
         </div>
@@ -83,7 +134,7 @@ export class ProjectStepComponent implements OnChanges {
   @Output() reload = new EventEmitter<void>();
 
   values: Record<string, unknown> = {};
-  docs: Record<string, (StoredFile & { at: string; by?: string })[]> = {};
+  docs: Record<string, DocFile[]> = {};
   plannedDate = '';
   owner = '';
   notes = '';
@@ -92,6 +143,7 @@ export class ProjectStepComponent implements OnChanges {
   uploading = false;
   private readonly fileService = inject(FileService);
   readonly fmtDateTime = fmtDateTime;
+  readonly fmtDate = fmtDate;
 
   constructor(
     private readonly api: ApiService,
@@ -133,6 +185,53 @@ export class ProjectStepComponent implements OnChanges {
       owner: this.data.owner ?? '',
       notes: this.data.notes ?? '',
     });
+  }
+
+  readonly signerRoles = ['ลูกค้า', 'ผู้ให้บริการเครือข่าย (NT)', 'SJP', 'ผู้รับเหมาช่วง', 'อื่นๆ'];
+  signoffKey = '';
+  signoffIndex = -1;
+
+  editingSignoff(key: string, index: number): boolean {
+    return this.signoffKey === key && this.signoffIndex === index;
+  }
+
+  toggleSignoff(key: string, index: number): void {
+    if (this.editingSignoff(key, index)) {
+      this.signoffKey = '';
+      this.signoffIndex = -1;
+    } else {
+      this.signoffKey = key;
+      this.signoffIndex = index;
+    }
+    this.cdr.markForCheck();
+  }
+
+  setSignoff(key: string, index: number, field: 'signerName' | 'signerRole' | 'signedDate' | 'version', value: string): void {
+    const list = [...(this.docs[key] ?? [])];
+    const file = list[index];
+    if (!file) return;
+    list[index] = { ...file, [field]: value };
+    this.docs = { ...this.docs, [key]: list };
+    this.cdr.markForCheck();
+  }
+
+  signerRoleLabel(role?: string): string {
+    return role || 'ไม่ระบุบทบาท';
+  }
+
+  get missingDocs(): string[] {
+    return this.step.docs
+      .filter((doc) => (this.step.requireDocs || doc.required) && !(this.docs[doc.key] ?? []).length)
+      .map((doc) => doc.label);
+  }
+
+  get missingSignoffs(): string[] {
+    return this.step.docs
+      .filter((doc) => {
+        const files = this.docs[doc.key] ?? [];
+        return doc.signoff && files.length > 0 && !files.some((file) => file.signerName && file.signedDate);
+      })
+      .map((doc) => doc.label);
   }
 
   save(): void {

@@ -337,7 +337,12 @@ export class MetadataService implements OnApplicationBootstrap {
           ? raw.docs.map((d) => {
               const docKey = String(d.key ?? '').trim();
               if (!KEY.test(docKey)) bad(`key เอกสาร "${docKey}" ไม่ถูกต้อง`);
-              return { key: docKey, label: String(d.label ?? docKey).slice(0, 120) };
+              return {
+                key: docKey,
+                label: String(d.label ?? docKey).slice(0, 120),
+                ...(d.required ? { required: true } : {}),
+                ...(d.signoff ? { signoff: true } : {}),
+              };
             })
           : [],
         enabled: raw.enabled !== false,

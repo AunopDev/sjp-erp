@@ -4,7 +4,8 @@ import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
 import { MetaService } from '../core/meta.service';
 import { PdfService } from '../core/pdf.service';
-import { fmtDate, fmtDateTime } from '../core/util';
+import { readDetailNav } from '../core/storage';
+import { fmtDate, fmtDateTime, listNeighbours } from '../core/util';
 import { ProjectStepComponent } from './project-step.component';
 import { RecordFormComponent } from '../shared/record-form.component';
 import { ToastService } from '../shared/toast.service';
@@ -23,6 +24,13 @@ type StepData = Record<string, unknown>;
           <div><h1>{{ p['name'] }}</h1><div class="muted">{{ p.code }} · {{ statusText(p) }}</div></div>
           <div class="page-actions">
             <button type="button" class="btn" (click)="back()">‹ รายการ</button>
+            @if (nav(); as position) {
+              <div class="nav-pair" role="group" aria-label="เลื่อนไประหว่างโครงการ">
+                <button type="button" class="btn nav-step" [disabled]="!position.prev" (click)="goSibling(position.prev)" aria-label="โครงการก่อนหน้า">‹</button>
+                <span class="nav-count">{{ position.index + 1 }}/{{ position.total }}</span>
+                <button type="button" class="btn nav-step" [disabled]="!position.next" (click)="goSibling(position.next)" aria-label="โครงการถัดไป">›</button>
+              </div>
+            }
             <button type="button" class="btn" (click)="printPage()">พิมพ์</button>
             <button type="button" class="btn" (click)="downloadPdf()">ดาวน์โหลด PDF</button>
             @if (auth.can('projects','edit') && !p['closed']) { <button type="button" class="btn" (click)="editOpen.set(true)">แก้ไขข้อมูล</button> }
@@ -36,6 +44,42 @@ type StepData = Record<string, unknown>;
           <div class="stat"><div class="l">ผู้จัดการโครงการ</div><div class="v" style="font-size:18px">{{ p._labels?.['manager'] || '–' }}</div><div class="s">{{ p['contractNo'] ? 'สัญญา ' + p['contractNo'] : '' }}</div></div>
         </div>
         @if (p['closed']) { <div class="notice bad">โครงการปิดแล้ว — {{ p['closeReason'] }}</div> }
+
+        @if (govGate(); as gate) {
+          <div class="card gov-gate">
+            <div class="gov-head">
+              <h3>เส้นทางโครงการ: {{ gate.track }}</h3>
+              <span class="badge {{ gate.ictRequired ? (gate.ictOk ? 'green' : 'amber') : 'gray' }}">
+                {{ gate.ictRequired ? (gate.ictOk ? 'defended ICT ผ่าน' : 'รอ defended ICT') : 'ไม่ต้อง defended' }}
+              </span>
+            </div>
+            <div class="gov-grid">
+              <div class="gov-item">
+                <span class="gov-label">มูลค่า / เกณฑ์</span>
+                <div class="gov-value">{{ baht(gate.value) }} <span class="muted">/ {{ baht(gate.threshold) }}</span></div>
+                <span class="gov-note">{{ gate.ictRequired ? (gate.ictOk ? 'ผ่าน defended ICT แล้ว — ไปต่อได้' : 'เกินเกณฑ์ — ต้อง defended ICT ก่อนจบขั้นเสนอ') : (gate.track === 'ราชการ (ประมูล)' ? 'ต่ำกว่าเกณฑ์ที่ต้อง defended' : 'เส้นทางนี้ไม่ต้อง defended ICT') }}</span>
+              </div>
+              <div class="gov-item">
+                <span class="gov-label">ผล defended ICT</span>
+                <div class="gov-value">{{ gate.ict || 'ยังไม่บันทึก' }}</div>
+                @if (gate.ictRequired && !gate.ictOk) {
+                  <button type="button" class="btn sm" (click)="focusStep('proposal')">ไปบันทึกที่ขั้น 3</button>
+                }
+              </div>
+              <div class="gov-item">
+                <span class="gov-label">คู่สัญญา / MOU</span>
+                <div class="gov-value">{{ gate.partner || 'ยังไม่ระบุ' }}@if (gate.mouNo) { · {{ gate.mouNo }} }</div>
+                @if (gate.mouRequired && !gate.mouOk) {
+                  <button type="button" class="btn sm" (click)="focusStep('kickoff')">ไปบันทึกที่ขั้น 5</button>
+                }
+              </div>
+              <div class="gov-item">
+                <span class="gov-label">ส่วนแบ่งรายได้ SJP</span>
+                <div class="gov-value">{{ gate.share ? gate.share + '%' : '—' }}</div>
+              </div>
+            </div>
+          </div>
+        }
 
         <div class="tabs">
           <button type="button" [class.active]="tab() === 'steps'" (click)="tab.set('steps')">ขั้นตอน <span class="tab-count">{{ steps().length }}</span></button>
@@ -73,7 +117,7 @@ type StepData = Record<string, unknown>;
         }
 
         @if (tab() === 'info') {
-          <div class="card">@for (field of fields(); track field.key) { <div class="kv"><div class="k">{{ field.label }}</div><div class="v">{{ display(field, p) }}</div></div> }</div>
+          <div class="card">@for (field of fields(); track field.key) { <div class="kv"><div class="k">{{ field.label }}</div><div class="v">{{ display(field, p) }}@if (field.help) { <div class="kv-help">{{ field.help }}</div> }</div></div> }</div>
         }
 
         @if (tab() === 'boq') {
@@ -114,6 +158,32 @@ export class ProjectDetailComponent implements OnInit {
   readonly audit = signal<Record<string, unknown>[]>([]);
   readonly boqRows = signal<Record<string, unknown>[]>([]);
   readonly loading = signal(true);
+  readonly nav = signal<{ index: number; total: number; prev: string; next: string } | null>(null);
+  readonly bidThreshold = signal(500_000);
+  readonly govGate = computed(() => {
+    const project = this.project();
+    if (!project) return null;
+    const track = String(project['track'] ?? '');
+    if (track !== 'ราชการ (ประมูล)' && track !== 'ร่วมทุน SJP–NT') return null;
+    const threshold = this.bidThreshold();
+    const value = Number(project['value'] ?? 0);
+    const ict = String(this.stepValue('proposal', 'ictDefend') ?? '');
+    const partner = String(this.stepValue('kickoff', 'partner') ?? '');
+    const mouNo = String(this.stepValue('kickoff', 'mouNo') ?? '');
+    return {
+      track,
+      threshold,
+      value,
+      ict,
+      ictRequired: track === 'ราชการ (ประมูล)' && Number.isFinite(value) && value > threshold,
+      ictOk: ict === 'ผ่าน',
+      partner,
+      mouNo,
+      mouRequired: partner === 'NT' || track === 'ร่วมทุน SJP–NT',
+      mouOk: !!mouNo.trim(),
+      share: Number(project['sharePercent'] ?? 0) || 0,
+    };
+  });
   readonly editOpen = signal(false);
   readonly tab = signal<'steps' | 'info' | 'boq' | 'audit'>('steps');
   readonly openKey = signal('');
@@ -127,7 +197,23 @@ export class ProjectDetailComponent implements OnInit {
   ngOnInit(): void {
     this.meta.load();
     this.meta.options('users').subscribe((users) => this.users.set(users));
-    this.load();
+    this.api.get<{ governmentBidThreshold?: number }>('/company').subscribe({
+      next: (company) => {
+        const threshold = Number(company.governmentBidThreshold);
+        if (Number.isFinite(threshold) && threshold >= 0) this.bidThreshold.set(threshold);
+      },
+      error: () => undefined,
+    });
+    // Reused when moving between projects: reset and reload on the new id.
+    this.route.paramMap.subscribe(() => {
+      this.project.set(null);
+      this.audit.set([]);
+      this.boqRows.set([]);
+      this.openKey.set('');
+      this.loading.set(true);
+      this.tab.set('steps');
+      this.load();
+    });
   }
 
   load(): void {
@@ -136,6 +222,7 @@ export class ProjectDetailComponent implements OnInit {
     this.api.get<RecordRow>(`/records/projects/${id}`).subscribe({
       next: (project) => {
         this.project.set(project);
+        this.nav.set(listNeighbours(readDetailNav('projects'), id));
         this.loading.set(false);
         if (!this.openKey()) this.openKey.set(this.currentKey());
         this.api.get<Record<string, unknown>[]>(`/audit/records/projects/${id}`).subscribe({ next: (audit) => this.audit.set(audit), error: () => this.audit.set([]) });
@@ -157,6 +244,20 @@ export class ProjectDetailComponent implements OnInit {
 
   stepData(key: string): StepData {
     return this.stepsData()[key] ?? { status: 'pending', values: {}, docs: {}, log: [] };
+  }
+
+  stepValue(step: string, key: string): unknown {
+    const values = this.stepData(step)['values'];
+    return values && typeof values === 'object' ? (values as Record<string, unknown>)[key] : undefined;
+  }
+
+  baht(value: number): string {
+    return new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
+  }
+
+  focusStep(key: string): void {
+    this.tab.set('steps');
+    this.openKey.set(key);
   }
 
   done(): number {
@@ -224,6 +325,10 @@ export class ProjectDetailComponent implements OnInit {
 
   back(): void {
     void this.router.navigate(['/projects']);
+  }
+
+  goSibling(id: string): void {
+    if (id) void this.router.navigate(['/projects', id]);
   }
 
   printPage(): void {

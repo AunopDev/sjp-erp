@@ -19,6 +19,8 @@ export interface CompanyInfo {
   email: string;
   website: string;
   footerNote: string;
+  /** Projects above this value on the government track must pass an ICT defence gate. */
+  governmentBidThreshold: number;
 }
 
 const DEFAULT_COMPANY: CompanyInfo = {
@@ -30,6 +32,7 @@ const DEFAULT_COMPANY: CompanyInfo = {
   email: '',
   website: '',
   footerNote: '',
+  governmentBidThreshold: 500_000,
 };
 
 @Injectable()
@@ -44,11 +47,17 @@ export class CompanyService {
     const row = this.db.select().from(settings).where(eq(settings.key, COMPANY_KEY)).all()[0];
     const value = row?.value;
     if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_COMPANY };
-    return { ...DEFAULT_COMPANY, ...(value as Partial<CompanyInfo>) };
+    const merged = { ...DEFAULT_COMPANY, ...(value as Partial<CompanyInfo>) };
+    const threshold = Number(merged.governmentBidThreshold);
+    merged.governmentBidThreshold = Number.isFinite(threshold) && threshold >= 0 ? Math.round(threshold) : DEFAULT_COMPANY.governmentBidThreshold;
+    return merged;
   }
 
   save(user: SafeUser, input: Partial<CompanyInfo>): CompanyInfo {
     this.access.require(user, 'settings', 'edit');
+    const current = this.get();
+    const rawThreshold = Number(input.governmentBidThreshold ?? current.governmentBidThreshold);
+    if (!Number.isFinite(rawThreshold) || rawThreshold < 0) bad('เกณฑ์มูลค่าโครงการราชการไม่ถูกต้อง');
     const next: CompanyInfo = {
       name: String(input.name ?? '').trim().slice(0, 120) || 'SJP ERP',
       nameEn: String(input.nameEn ?? '').trim().slice(0, 160),
@@ -58,6 +67,7 @@ export class CompanyService {
       email: String(input.email ?? '').trim().slice(0, 160),
       website: String(input.website ?? '').trim().slice(0, 160),
       footerNote: String(input.footerNote ?? '').trim().slice(0, 300),
+      governmentBidThreshold: Math.round(rawThreshold),
     };
     if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) bad('อีเมลบริษัทไม่ถูกต้อง');
     const row = this.db.select().from(settings).where(eq(settings.key, COMPANY_KEY)).all()[0];

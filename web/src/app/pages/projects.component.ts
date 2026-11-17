@@ -98,12 +98,12 @@ export class ProjectsComponent implements OnInit {
     return this.meta.projectSteps().filter((step) => step.enabled);
   }
 
-  private done(row: Record<string, any>): number {
+  private done(row: Record<string, unknown>): number {
     const steps = (row['steps'] as Record<string, { status?: string }> | undefined) ?? {};
     return this.steps().filter((step) => ['done', 'skipped'].includes(steps[step.key]?.status ?? 'pending')).length;
   }
 
-  private stepLabel(row: Record<string, any>): string {
+  private stepLabel(row: Record<string, unknown>): string {
     if (row['closed']) return `ปิดโครงการ: ${row['closeReason'] ?? ''}`;
     const steps = (row['steps'] as Record<string, { status?: string }> | undefined) ?? {};
     return this.steps().find((step) => !['done', 'skipped'].includes(steps[step.key]?.status ?? 'pending'))?.label ?? 'ครบทุกขั้นตอน';

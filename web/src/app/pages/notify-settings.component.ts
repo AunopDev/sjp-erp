@@ -1,7 +1,19 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
+import { fmtDateTime } from '../core/util';
 import { ToastService } from '../shared/toast.service';
+
+interface NotifyQueueRow {
+  id: string;
+  channel: 'email' | 'line';
+  subject: string;
+  status: 'pending' | 'sent' | 'failed';
+  attempts: number;
+  lastError: string;
+  createdAt: string;
+  sentAt: string | null;
+}
 
 interface NotifyConfig {
   emailEnabled: boolean;
@@ -84,6 +96,45 @@ const EMPTY: NotifyConfig = {
 
       @if (message()) { <div class="notice" [class.bad]="error()" style="margin-top:14px">{{ message() }}</div> }
     </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="row" style="margin-bottom:8px">
+        <div>
+          <h3 style="margin:0">คิวการส่งล่าสุด</h3>
+          <div class="muted small">ส่งไม่สำเร็จจะลองใหม่ให้อัตโนมัติ (1 · 5 · 15 · 60 · 180 นาที, สูงสุด 5 ครั้ง) และไม่หายเมื่อรีสตาร์ท</div>
+        </div>
+        <span class="grow"></span>
+        <button type="button" class="btn sm" [disabled]="queueLoading()" (click)="loadQueue()">{{ queueLoading() ? 'กำลังโหลด…' : 'รีเฟรช' }}</button>
+      </div>
+      @if (!queue().length) {
+        <div class="state empty">ยังไม่มีคิวการส่ง</div>
+      } @else {
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr><th scope="col">เวลา</th><th scope="col">ช่องทาง</th><th scope="col">หัวข้อ</th><th scope="col">สถานะ</th><th scope="col">ลอง</th><th scope="col">ข้อผิดพลาดล่าสุด</th><th scope="col"><span class="sr-only">จัดการ</span></th></tr></thead>
+            <tbody>
+              @for (row of queue(); track row.id) {
+                <tr>
+                  <td data-label="เวลา">{{ fmtDateTime(row.createdAt) }}</td>
+                  <td data-label="ช่องทาง">{{ row.channel === 'email' ? 'อีเมล' : 'LINE' }}</td>
+                  <td data-label="หัวข้อ">{{ row.subject }}</td>
+                  <td data-label="สถานะ"><span class="badge {{ statusBadge(row.status) }}">{{ statusLabel(row.status) }}</span></td>
+                  <td data-label="ลอง">{{ row.attempts }}</td>
+                  <td data-label="ข้อผิดพลาดล่าสุด" class="small">{{ row.lastError || '—' }}</td>
+                  <td>
+                    @if (row.status !== 'sent' && auth.can('settings', 'edit')) {
+                      <button type="button" class="btn sm" [disabled]="retrying() === row.id" (click)="retryQueue(row)">
+                        {{ retrying() === row.id ? 'กำลังคิว…' : 'ลองใหม่' }}
+                      </button>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -97,9 +148,53 @@ export class NotifySettingsComponent implements OnInit {
   readonly testing = signal<'' | 'email' | 'line'>('');
   readonly message = signal('');
   readonly error = signal(false);
+  readonly queue = signal<NotifyQueueRow[]>([]);
+  readonly queueLoading = signal(false);
+  readonly retrying = signal('');
+  readonly fmtDateTime = fmtDateTime;
 
   ngOnInit(): void {
     this.load();
+    this.loadQueue();
+  }
+
+  loadQueue(): void {
+    if (this.queueLoading()) return;
+    this.queueLoading.set(true);
+    this.api.get<{ items: NotifyQueueRow[] }>('/notify/queue').subscribe({
+      next: (result) => {
+        this.queue.set(result.items ?? []);
+        this.queueLoading.set(false);
+      },
+      error: (error: unknown) => {
+        this.queueLoading.set(false);
+        this.toast.error(apiErrorMessage(error));
+      },
+    });
+  }
+
+  retryQueue(row: NotifyQueueRow): void {
+    if (this.retrying()) return;
+    this.retrying.set(row.id);
+    this.api.post(`/notify/queue/${row.id}/retry`, {}).subscribe({
+      next: () => {
+        this.retrying.set('');
+        this.toast.show('เข้าคิวส่งใหม่อีกครั้งแล้ว');
+        this.loadQueue();
+      },
+      error: (error: unknown) => {
+        this.retrying.set('');
+        this.toast.error(apiErrorMessage(error));
+      },
+    });
+  }
+
+  statusLabel(status: NotifyQueueRow['status']): string {
+    return status === 'sent' ? 'ส่งแล้ว' : status === 'failed' ? 'ล้มเหลว' : 'รอส่ง';
+  }
+
+  statusBadge(status: NotifyQueueRow['status']): string {
+    return status === 'sent' ? 'green' : status === 'failed' ? 'red' : 'amber';
   }
 
   load(): void {

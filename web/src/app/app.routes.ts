@@ -15,6 +15,7 @@ export const routes: Routes = [
       { path: '', loadComponent: () => import('./pages/dashboard.component').then((m) => m.DashboardComponent) },
       { path: 'workspace', loadComponent: () => import('./pages/workspace.component').then((m) => m.WorkspaceComponent) },
       { path: 'my', loadComponent: () => import('./pages/my-work.component').then((m) => m.MyWorkComponent) },
+      { path: 'account', loadComponent: () => import('./pages/account.component').then((m) => m.AccountComponent) },
       { path: 'approvals', loadComponent: () => import('./pages/approvals.component').then((m) => m.ApprovalsComponent) },
       { path: 'entities/:entity', canActivate: [entityGuard], loadComponent: () => import('./pages/entity-list.component').then((m) => m.EntityListComponent) },
       { path: 'entities/:entity/:id', canActivate: [entityGuard], loadComponent: () => import('./pages/entity-detail.component').then((m) => m.EntityDetailComponent) },

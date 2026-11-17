@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
-import { displayValue, downloadCsv } from '../core/util';
-import { readColumnPrefs, readTableViews, writeColumnPrefs, writeTableViews } from '../core/storage';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, OnDestroy, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
+import { displayValue, downloadCsv, copyText, toTsv } from '../core/util';
+import { readColumnPrefs, readTableViews, writeColumnPrefs, writeDetailNav, writeTableViews } from '../core/storage';
 import { IconComponent } from './icon.component';
 import { StateComponent } from './state.component';
 
@@ -107,6 +107,18 @@ interface SavedView {
           }
         </div>
         @if (canExport()) {
+          <button
+            type="button"
+            class="btn tool"
+            [disabled]="!filtered().length"
+            (click)="copyList()"
+            [attr.aria-label]="'คัดลอกรายการที่กรองแล้ว ' + filtered().length + ' รายการ'"
+          >
+            <app-icon name="copy" [size]="18" />
+            <span aria-live="polite">
+              {{ copyState() === 'done' ? 'คัดลอกแล้ว' : copyState() === 'fail' ? 'คัดลอกไม่ได้' : 'คัดลอกรายการ (' + filtered().length + ')' }}
+            </span>
+          </button>
           <button type="button" class="btn tool" [disabled]="!filtered().length" (click)="exportCsv()">
             <app-icon name="download" [size]="18" /> ส่งออก CSV
           </button>
@@ -165,7 +177,7 @@ interface SavedView {
                   <tr
                     [class]="'click ' + rowClass()(row)"
                     tabindex="0"
-                    (click)="rowClick.emit(row)"
+                    (click)="onRowClick(row)"
                     (keydown)="onRowKey($event, row)"
                   >
                     @for (column of visibleColumns(); track column.key) {
@@ -201,7 +213,7 @@ interface SavedView {
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class DataTableComponent implements OnInit {
+export class DataTableComponent implements OnInit, OnDestroy {
   readonly columns = input.required<ColumnDef[]>();
   readonly rows = input<RecordRowInput[]>([]);
   readonly filters = input<FilterDef[]>([]);
@@ -233,6 +245,8 @@ export class DataTableComponent implements OnInit {
   readonly savedViews = signal<SavedView[]>([]);
   readonly viewMenu = signal(false);
   readonly viewName = signal('');
+  readonly copyState = signal<'idle' | 'done' | 'fail'>('idle');
+  private copyTimer: ReturnType<typeof setTimeout> | null = null;
   readonly sizes = [10, 25, 50, 100];
   private readonly host = inject(ElementRef) as ElementRef<HTMLElement>;
 
@@ -357,6 +371,10 @@ export class DataTableComponent implements OnInit {
     this.tab.set(this.initialTab() || this.tabs()[0]?.key || '');
   }
 
+  ngOnDestroy(): void {
+    if (this.copyTimer) clearTimeout(this.copyTimer);
+  }
+
   onSearch(event: Event): void {
     this.q.set((event.target as HTMLInputElement).value);
   }
@@ -376,6 +394,11 @@ export class DataTableComponent implements OnInit {
   onRowKey(event: KeyboardEvent, row: AnyRow): void {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
+    this.onRowClick(row);
+  }
+
+  onRowClick(row: AnyRow): void {
+    writeDetailNav(this.exportName(), this.filtered().map((item) => String(item['id'])));
     this.rowClick.emit(row);
   }
 
@@ -428,6 +451,21 @@ export class DataTableComponent implements OnInit {
     const columns = this.visibleColumns();
     const data = rows.map((row) => columns.map((column) => this.rawValue(row, column) ?? ''));
     downloadCsv(`${this.exportName()}-${new Date().toISOString().slice(0, 10)}.csv`, columns.map((c) => c.label), data);
+  }
+
+  /** Copies the current filter/sort result as TSV — handy for LINE or a spreadsheet. */
+  async copyList(): Promise<void> {
+    const rows = this.filtered();
+    if (!rows.length) return;
+    const columns = this.visibleColumns();
+    const text = toTsv(
+      columns.map((column) => column.label),
+      rows.map((row) => columns.map((column) => this.rawValue(row, column))),
+    );
+    const ok = await copyText(text);
+    this.copyState.set(ok ? 'done' : 'fail');
+    if (this.copyTimer) clearTimeout(this.copyTimer);
+    this.copyTimer = setTimeout(() => this.copyState.set('idle'), 2200);
   }
 }
 

@@ -1,6 +1,6 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { Db } from '../db/database.service.js';
 import { audit } from '../db/schema.js';
 import type { SafeUser } from '../auth/user.types.js';
@@ -39,20 +39,20 @@ export class AuditService {
 
   listByEntity(entity: string, recordId?: string) {
     const where = recordId ? and(eq(audit.entity, entity), eq(audit.recordId, recordId)) : eq(audit.entity, entity);
-    return this.db.select().from(audit).where(where).all().reverse();
+    return this.db.select().from(audit).where(where).orderBy(desc(audit.at)).all();
   }
 
   recent(limit = 20) {
-    return this.db.select().from(audit).all().slice(-limit).reverse();
+    return this.db.select().from(audit).orderBy(desc(audit.at)).limit(limit).all();
   }
 
   recentForUser(userId: string, limit = 20) {
     return this.db
       .select()
       .from(audit)
-      .all()
-      .filter((row) => row.userId === userId)
-      .slice(-limit)
-      .reverse();
+      .where(eq(audit.userId, userId))
+      .orderBy(desc(audit.at))
+      .limit(limit)
+      .all();
   }
 }

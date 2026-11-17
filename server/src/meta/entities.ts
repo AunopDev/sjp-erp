@@ -85,6 +85,10 @@ export interface WorkflowStatus {
 export interface StepDoc {
   key: string;
   label: string;
+  /** Must be attached before the step can close. */
+  required?: boolean;
+  /** Must record signer name + signed date on at least one attachment. */
+  signoff?: boolean;
 }
 
 export interface ProjectStepDef {
@@ -213,7 +217,7 @@ const poStatuses = (): WorkflowStatus[] => [
   { key: 'cancelled', label: 'ยกเลิก', color: 'red', next: [], requiredFields: [], final: true, enabled: true },
 ];
 
-const D = (key: string, label: string): StepDoc => ({ key, label });
+const D = (key: string, label: string, extra: Partial<StepDoc> = {}): StepDoc => ({ key, label, ...extra });
 const S = (
   key: string,
   label: string,
@@ -276,8 +280,9 @@ export const projectSteps = (): ProjectStepDef[] => [
     'proposal',
     '3. จัดทำเอกสารเสนอและประเมินงาน',
     'Requirement Form/Card, BOQ, ใบเสนอราคา, TOR และเอกสารประกวดราคา/ประมูลตามที่ใช้จริง',
-    [f('submitDate', 'วันที่ยื่นเอกสาร', 'date'), f('quoteNo', 'เลขที่ใบเสนอราคา')],
-    [D('req_form', 'Requirement Form / Requirement Card'), D('boq', 'BOQ'), D('quote', 'ใบเสนอราคา'), D('tor', 'TOR'), D('bid_docs', 'เอกสารประกวดราคา/ประมูล (ถ้ามี)')],
+    [f('submitDate', 'วันที่ยื่นเอกสาร', 'date'), f('quoteNo', 'เลขที่ใบเสนอราคา'),
+      sel('ictDefend', 'ผล defended ICT', ['ไม่ต้อง', 'รอผล', 'ผ่าน', 'ไม่ผ่าน'], { help: 'บังคับเมื่อเป็นโครงการราชการและมูลค่าเกินเกณฑ์ที่ตั้งไว้' })],
+    [D('req_form', 'Requirement Form / Requirement Card'), D('boq', 'BOQ', { required: true }), D('quote', 'ใบเสนอราคา', { required: true }), D('tor', 'TOR'), D('bid_docs', 'เอกสารประกวดราคา/ประมูล (ถ้ามี)')],
   ),
   S(
     'bid',
@@ -285,10 +290,12 @@ export const projectSteps = (): ProjectStepDef[] => [
     'บันทึกชนะ/ไม่ชนะ เหตุผล และเอกสารอ้างอิง',
     [
       sel('bidResult', 'ผลการเสนอราคา/ประมูล', ['รอผล', 'ชนะ', 'ไม่ชนะ'], { required: true }),
+      f('bidNo', 'เลขที่เอกสารประมูล'),
+      f('bidPrice', 'ราคาที่เสนอ (บาท)', 'number'),
       f('bidReason', 'เหตุผล', 'textarea'),
       f('bidRef', 'เลขที่เอกสารอ้างอิง'),
     ],
-    [D('bid_result', 'เอกสารผลการพิจารณา')],
+    [D('bid_result', 'เอกสารผลการพิจารณา', { required: true })],
   ),
   S(
     'kickoff',
@@ -297,11 +304,13 @@ export const projectSteps = (): ProjectStepDef[] => [
     [
       f('contractNo', 'เลขที่สัญญา'),
       f('poNo', 'เลขที่ PO'),
+      sel('partner', 'คู่สัญญา/พาร์ตเนอร์', ['SJP', 'NT', 'อื่นๆ'], { help: 'ถ้าเป็น NT ต้องระบุเลขที่ MOU SJP–NT' }),
+      f('mouNo', 'เลขที่ MOU SJP–NT'),
       f('signDate', 'วันที่ลงนามสัญญา', 'date'),
       f('kickoffDate', 'วันประชุม Kickoff', 'date'),
       f('stakeholders', 'ผู้เกี่ยวข้อง', 'textarea'),
     ],
-    [D('contract', 'สัญญา'), D('po', 'PO'), D('kickoff_minutes', 'บันทึกการประชุม Kickoff')],
+    [D('contract', 'สัญญา', { required: true, signoff: true }), D('po', 'PO'), D('kickoff_minutes', 'บันทึกการประชุม Kickoff')],
   ),
   S(
     'survey',
@@ -317,7 +326,7 @@ export const projectSteps = (): ProjectStepDef[] => [
       }),
       f('siteReq', 'ข้อกำหนดหน้างาน', 'textarea'),
     ],
-    [D('survey', 'Site Survey'), D('shop', 'Shop Drawing'), D('plan', 'แปลน'), D('positions', 'ตำแหน่งติดตั้ง')],
+    [D('survey', 'Site Survey', { required: true }), D('shop', 'Shop Drawing'), D('plan', 'แปลน'), D('positions', 'ตำแหน่งติดตั้ง')],
   ),
   S(
     'design',
@@ -383,14 +392,14 @@ export const projectSteps = (): ProjectStepDef[] => [
       }),
     ],
     [
-      D('install_report', 'รายงานติดตั้งจริง'),
+      D('install_report', 'รายงานติดตั้งจริง', { required: true }),
       D('asbuilt', 'As-built Drawing'),
       D('asbuilt_net', 'Network Diagram (As-built)'),
       D('photos', 'จุดพิกัดและภาพถ่ายหน้างาน'),
       D('manual', 'คู่มือระบบ'),
       D('training', 'เอกสารฝึกอบรม'),
-      D('handover_doc', 'เอกสารส่งมอบ'),
-      D('acceptance', 'ผลตรวจรับตามข้อกำหนดโครงการ'),
+      D('handover_doc', 'เอกสารส่งมอบ', { required: true, signoff: true }),
+      D('acceptance', 'ผลตรวจรับตามข้อกำหนดโครงการ', { required: true, signoff: true }),
     ],
   ),
   S(
@@ -467,14 +476,14 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
     filters: ['type'],
     fields: [
       f('name', 'ชื่อลูกค้า', 'text', { required: true }),
-      f('taxId', 'เลขประจำตัวผู้เสียภาษี'),
+      f('taxId', 'เลขประจำตัวผู้เสียภาษี', 'text', { help: 'ใช้บนใบกำกับภาษี/ใบแจ้งหนี้ (13 หลัก)' }),
       f('type', 'ประเภท', 'select', { options: ['ภาครัฐ', 'รัฐวิสาหกิจ', 'เอกชน', 'อื่นๆ'] }),
       f('phone', 'โทรศัพท์'),
       f('email', 'อีเมล', 'email'),
       f('address', 'ที่อยู่', 'textarea'),
-      f('owner', 'ผู้รับผิดชอบบัญชี', 'ref', { ref: 'users' }),
+      f('owner', 'ผู้รับผิดชอบบัญชี', 'ref', { ref: 'users', help: 'ผู้ดูแลความสัมพันธ์หลักของลูกค้ารายนี้' }),
       f('note', 'หมายเหตุ', 'textarea'),
-      f('attachments', 'ไฟล์แนบ', 'file'),
+      f('attachments', 'ไฟล์แนบ', 'file', { help: 'สัญญา ใบเสนอราคา หรือเอกสารยืนยันตัวตน' }),
     ],
   },
   vendors: {
@@ -601,9 +610,16 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
       f('site', 'ไซต์หลัก', 'ref', { ref: 'sites' }),
       f('manager', 'ผู้จัดการโครงการ', 'ref', { ref: 'users' }),
       f('team', 'ทีมรับผิดชอบ', 'select', TEAM),
-      f('contractNo', 'เลขที่สัญญา'),
+      f('track', 'เส้นทางโครงการ', 'select', {
+        options: ['มาตรฐาน', 'ราชการ (ประมูล)', 'ร่วมทุน SJP–NT', 'R&D'],
+        help: 'เลือก "ราชการ (ประมูล)" เพื่อใช้เกณฑ์ defended ICT และขั้นตอนประมูล',
+      }),
+      f('contractNo', 'เลขที่สัญญา', 'text', { help: 'อ้างอิงในเอกสารส่งมอบและใบแจ้งหนี้' }),
       f('poNo', 'เลขที่ PO ลูกค้า'),
-      f('value', 'มูลค่าโครงการ (บาท)', 'number'),
+      f('value', 'มูลค่าโครงการ (บาท)', 'number', { help: 'ใช้ในภาพรวมการเงินและรายงาน' }),
+      f('contractStart', 'วันเริ่มสัญญา', 'date'),
+      f('contractEnd', 'วันสิ้นสุดสัญญา', 'date'),
+      f('sharePercent', 'ส่วนแบ่งรายได้ SJP (%)', 'number', { help: 'ใช้เมื่อเป็นโครงการร่วมทุน/พาร์ตเนอร์' }),
       f('boq', 'BOQ (รายการอุปกรณ์ที่ต้องใช้)', 'rows', {
         cols: [
           { key: 'item', label: 'สินค้า/อุปกรณ์', type: 'ref', ref: 'items', required: true },
@@ -627,16 +643,16 @@ export const ENTITY_DEFS: Record<string, EntityDef> = {
       f('title', 'หัวข้อ/ชื่อจุด', 'text', { required: true }),
       f('reportedBy', 'ผู้แจ้ง', 'text', { required: true }),
       f('channel', 'ช่องทางแจ้ง', 'select', { options: ['โทรศัพท์', 'LINE', 'อีเมล', 'เว็บ/ระบบ', 'หน้างาน', 'อื่นๆ'] }),
-      f('receivedAt', 'วันเวลาที่รับเรื่อง', 'datetime', { required: true }),
+      f('receivedAt', 'วันเวลาที่รับเรื่อง', 'datetime', { required: true, help: 'ใช้คำนวณอายุเคสและเวลา SLA' }),
       f('customer', 'ลูกค้า', 'ref', { ref: 'customers', required: true }),
       f('project', 'โครงการ', 'ref', { ref: 'projects' }),
-      f('site', 'ไซต์', 'ref', { ref: 'sites', required: true }),
+      f('site', 'ไซต์', 'ref', { ref: 'sites', required: true, help: 'ต้องตรงกับไซต์ของลูกค้า ระบบจะตรวจให้' }),
       f('point', 'จุดติดตั้ง'),
       f('circuitNo', 'หมายเลขวงจร'),
       f('item', 'อุปกรณ์/รุ่น', 'ref', { ref: 'items' }),
       f('serial', 'Serial Number', 'ref', { ref: 'serials' }),
       f('category', 'หมวดงาน', 'select', { options: ['IT Support', 'Hardware', 'Software', 'Network', 'CCTV', 'PA', 'Spare Part', 'PM', 'อื่นๆ'], required: true }),
-      f('priority', 'ความเร่งด่วน', 'select', { options: ['ต่ำ', 'ปกติ', 'สูง', 'เร่งด่วน'], required: true }),
+      f('priority', 'ความเร่งด่วน', 'select', { options: ['ต่ำ', 'ปกติ', 'สูง', 'เร่งด่วน'], required: true, help: 'SLA: เร่งด่วน 4 ชม. · สูง 8 ชม. · ปกติ 24 ชม. · ต่ำ 72 ชม.' }),
       f('symptom', 'อาการ', 'textarea', { required: true }),
       f('description', 'รายละเอียดเพิ่มเติม', 'textarea'),
       f('initialFinding', 'ผลตรวจเบื้องต้น', 'textarea'),

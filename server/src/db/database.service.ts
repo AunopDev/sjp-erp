@@ -1,5 +1,5 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
-import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { chmodSync } from 'node:fs';
 import type { Database } from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
@@ -167,6 +167,8 @@ export const DEFAULT_ROLES = [
 
 @Injectable()
 export class DatabaseService implements OnModuleInit {
+  private readonly logger = new Logger(DatabaseService.name);
+
   constructor(@InjectDrizzle() readonly db: Db) {}
 
   onModuleInit(): void {
@@ -175,8 +177,8 @@ export class DatabaseService implements OnModuleInit {
     client.pragma('foreign_keys = ON');
     try {
       chmodSync(client.name, 0o600);
-    } catch {
-      /* best effort — Windows may not support POSIX modes */
+    } catch (error) {
+      this.logger.debug(`chmod database file skipped: ${error instanceof Error ? error.message : String(error)}`);
     }
     client.exec(`
       CREATE TABLE IF NOT EXISTS users (
@@ -301,7 +303,34 @@ export class DatabaseService implements OnModuleInit {
       );
       CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
         ON webhook_deliveries(status, next_attempt_at);
+      CREATE TABLE IF NOT EXISTS notify_queue (
+        id TEXT PRIMARY KEY,
+        channel TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_at TEXT NOT NULL,
+        last_error TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        sent_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_notify_queue_due
+        ON notify_queue(status, next_at);
     `);
+
+    // Defence in depth for the atomic counter: never allow the same document
+    // code twice inside one entity. Existing databases with duplicates are
+    // reported instead of failing startup; clean them before enforcing.
+    const duplicate = client
+      .prepare('SELECT 1 FROM records GROUP BY entity, code HAVING COUNT(*) > 1 LIMIT 1')
+      .get();
+    if (duplicate) {
+      this.logger.warn('records มี entity/code ซ้ำ — ยังไม่สร้าง unique index; ตรวจและล้างข้อมูลก่อน');
+    } else {
+      client.exec('CREATE UNIQUE INDEX IF NOT EXISTS records_entity_code_uq ON records(entity, code);');
+    }
 
     this.db
       .insert(roles)

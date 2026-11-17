@@ -10,7 +10,7 @@ const checks = [
   ['production index has CSP meta', /http-equiv="Content-Security-Policy"/.test(index)],
   ['production index allows scripts from self only', /script-src 'self'/.test(index)],
   ['production index has no unsafe-eval', !/unsafe-eval/.test(index)],
-  ['theme bootstrap is an external script', /<script src="theme-init\.js"><\/script>/.test(index)],
+  ['theme bootstrap is an external script', /<script src="\/?theme-init\.js"><\/script>/.test(index)],
   ['nginx sets CSP header', /add_header Content-Security-Policy/.test(nginx)],
   ['nginx denies framing', /frame-ancestors 'none'/.test(nginx)],
   ['nginx sets HSTS', /Strict-Transport-Security/.test(nginx)],

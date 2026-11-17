@@ -5,7 +5,7 @@ import type { Db } from '../db/database.service.js';
 import { users } from '../db/schema.js';
 import type { SafeUser } from '../auth/user.types.js';
 import { findEntity, type EntityDef } from '../meta/entities.js';
-import { forbidden } from './exceptions.js';
+import { forbidden, notFound } from './exceptions.js';
 
 export interface RecordLike {
   id: string;
@@ -96,7 +96,8 @@ export class AccessService {
   }
 
   requireSee(user: SafeUser, def: EntityDef, record: RecordLike): void {
-    if (!this.canSee(user, def, record)) forbidden('ไม่มีสิทธิ์เข้าถึงรายการนี้');
+    // ตอบ 404 แทน 403 เพื่อไม่เปิดเผยว่ามีรายการนี้อยู่จริง
+    if (!this.canSee(user, def, record)) notFound('ไม่พบรายการ');
   }
 
   isApprover(user: SafeUser, cfg: { approverRole?: string; approverUser?: string } | null | undefined): boolean {

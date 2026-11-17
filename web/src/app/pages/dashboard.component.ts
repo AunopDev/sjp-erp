@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiService, apiErrorMessage } from '../core/api.service';
 import { AuthService } from '../core/auth.service';
@@ -8,6 +8,14 @@ import { StateComponent } from '../shared/state.component';
 import { ToastService } from '../shared/toast.service';
 import type { DashboardData } from '../core/dashboard.models';
 import type { RecordRow } from '../core/models';
+
+interface FocusItem {
+  key: string;
+  label: string;
+  count: number;
+  tone: 'red' | 'amber' | 'blue';
+  link: string;
+}
 
 @Component({
   selector: 'app-dashboard',
@@ -26,12 +34,32 @@ import type { RecordRow } from '../core/models';
           <a class="btn" routerLink="/projects"><app-icon name="folder" [size]="14" /> โครงการ</a>
           <a class="btn" routerLink="/calendar"><app-icon name="calendar" [size]="14" /> ปฏิทินงาน</a>
           <a class="btn ghost" routerLink="/my"><app-icon name="check" [size]="14" /> งานของฉัน</a>
+          @if (lastLoaded(); as at) {
+            <span class="dash-updated muted small" aria-live="polite" title="รีเฟรชอัตโนมัติทุก 60 วินาทีขณะเปิดหน้านี้"><span class="live-dot" aria-hidden="true"></span>อัปเดต {{ fmtTime(at) }}</span>
+          }
+          <button type="button" class="btn ghost" [disabled]="refreshing()" (click)="load(true)">
+            <app-icon name="refresh" [size]="14" /> {{ refreshing() ? 'กำลังอัปเดต…' : 'รีเฟรช' }}
+          </button>
         </div>
       </header>
 
       @if (loading()) {
         <app-state kind="loading" message="กำลังโหลดข้อมูล…" />
       } @else if (data()) {
+        <section class="dash-focus" aria-label="สิ่งที่ต้องให้ความสนใจ">
+          <span class="dash-focus-title">โฟกัสวันนี้</span>
+          @if (!focusItems().length) {
+            <span class="focus-none">ทุกอย่างอยู่ในเกณฑ์ — ไม่มีรายการค้างที่ต้องตัดสินใจ</span>
+          } @else {
+            @for (item of focusItems(); track item.key) {
+              <a class="focus-chip {{ item.tone }}" [routerLink]="item.link">
+                <span class="focus-dot" aria-hidden="true"></span>
+                <b>{{ item.count }}</b>
+                <span>{{ item.label }}</span>
+              </a>
+            }
+          }
+        </section>
         <section class="dash-kpis" aria-label="ตัวชี้วัดสำคัญ">
           @if (auth.can('tickets', 'view') || auth.can('pm', 'view') || auth.can('projects', 'view')) {
             <a class="dash-kpi" routerLink="/my">
@@ -238,12 +266,14 @@ import type { RecordRow } from '../core/models';
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class DashboardComponent implements OnInit {
+export class DashboardComponent implements OnInit, OnDestroy {
   readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
   private readonly toast = inject(ToastService);
 
   readonly loading = signal(true);
+  readonly refreshing = signal(false);
+  readonly lastLoaded = signal<Date | null>(null);
   readonly data = signal<DashboardData | null>(null);
   readonly fmtDuration = fmtDuration;
   readonly fmtDateTime = fmtDateTime;
@@ -253,6 +283,31 @@ export class DashboardComponent implements OnInit {
     if (!stock.names.length) return 'สต็อกอยู่ในระดับปกติ';
     const joined = stock.names.join(', ');
     return joined.length > 42 ? `สินค้าต่ำ ${stock.low} รายการ` : joined;
+  });
+
+  readonly focusItems = computed<FocusItem[]>(() => {
+    const data = this.data();
+    if (!data) return [];
+    const items: FocusItem[] = [];
+    if (this.auth.can('tickets', 'view') && data.tickets.urgent > 0) {
+      items.push({ key: 'urgent', label: 'เคสเร่งด่วน', count: data.tickets.urgent, tone: 'red', link: '/tickets' });
+    }
+    if (data.pendingApprovals > 0) {
+      items.push({ key: 'approvals', label: 'รออนุมัติ', count: data.pendingApprovals, tone: 'amber', link: '/approvals' });
+    }
+    if (this.auth.can('pm', 'view') && data.pm.overdue > 0) {
+      items.push({ key: 'pm', label: 'PM เกินกำหนด', count: data.pm.overdue, tone: 'amber', link: '/pm' });
+    }
+    if (this.auth.can('accounting', 'view') && (data.finance?.invoices.overdue ?? 0) > 0) {
+      items.push({ key: 'invoices', label: 'ใบแจ้งหนี้เกินกำหนด', count: data.finance!.invoices.overdue, tone: 'red', link: '/entities/invoices' });
+    }
+    if (this.auth.can('accounting', 'view') && (data.finance?.expenses.pending ?? 0) > 0) {
+      items.push({ key: 'expenses', label: 'ค่าใช้จ่ายรออนุมัติ', count: data.finance!.expenses.pending, tone: 'amber', link: '/entities/expenses' });
+    }
+    if (this.auth.can('warehouse', 'view') && data.stock.low > 0) {
+      items.push({ key: 'stock', label: 'สินค้าใกล้หมด', count: data.stock.low, tone: 'blue', link: '/warehouse' });
+    }
+    return items;
   });
 
   money(value: unknown): string {
@@ -270,20 +325,56 @@ export class DashboardComponent implements OnInit {
   }
 
   get todayText(): string {
-    return new Intl.DateTimeFormat('th-TH-u-ca-gregory', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+    return new Intl.DateTimeFormat('th-TH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
   }
 
   ngOnInit(): void {
+    this.load();
+    this.timer = setInterval(this.tick, 60_000);
+    document.addEventListener('visibilitychange', this.onVisibility);
+  }
+
+  ngOnDestroy(): void {
+    if (this.timer) clearInterval(this.timer);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+  }
+
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  /** Background refresh only while the tab is visible and no request is running. */
+  private readonly tick = (): void => {
+    if (document.visibilityState !== 'visible' || this.refreshing()) return;
+    this.load(true, true);
+  };
+
+  private readonly onVisibility = (): void => {
+    if (document.visibilityState === 'visible' && !this.refreshing()) this.load(true, true);
+  };
+
+  /**
+   * `silent` keeps the current numbers on screen while refreshing; `quiet`
+   * suppresses error toasts for the automatic background refresh.
+   */
+  load(silent = false, quiet = false): void {
+    if (silent) this.refreshing.set(true);
+    else this.loading.set(true);
     this.api.get<DashboardData>('/dashboard').subscribe({
       next: (data) => {
         this.data.set(data);
+        this.lastLoaded.set(new Date());
         this.loading.set(false);
+        this.refreshing.set(false);
       },
       error: (error: unknown) => {
         this.loading.set(false);
-        this.toast.error(apiErrorMessage(error));
+        this.refreshing.set(false);
+        if (!quiet) this.toast.error(apiErrorMessage(error));
       },
     });
+  }
+
+  fmtTime(value: Date): string {
+    return new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(value);
   }
 
   projectSteps(): [string, number][] {

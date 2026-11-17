@@ -1,17 +1,20 @@
 import { InjectDrizzle } from '@nestjs/drizzle';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, lte } from 'drizzle-orm';
 import nodemailer from 'nodemailer';
 import type { Db } from '../db/database.service.js';
-import { settings } from '../db/schema.js';
+import { notifyQueue, settings } from '../db/schema.js';
 import type { SafeUser } from '../auth/user.types.js';
 import { AccessService } from '../common/access.service.js';
 import { AuditService } from '../common/audit.service.js';
-import { bad } from '../common/exceptions.js';
+import { bad, notFound } from '../common/exceptions.js';
 import { assertSafeHost } from '../common/network-guard.js';
 import { EventsService, type EventRow } from '../events/events.service.js';
 
 const CONFIG_KEY = 'notify';
+const LINE_PUSH_URL = 'https://api.line.me/v2/bot/message/push';
+const MAX_ATTEMPTS = 5;
+const BACKOFF_MINUTES = [1, 5, 15, 60, 180];
 
 export interface NotifyConfig {
   emailEnabled: boolean;
@@ -45,6 +48,8 @@ const DEFAULT_CONFIG: NotifyConfig = {
 
 @Injectable()
 export class NotifyService implements OnModuleInit {
+  private timer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
     @InjectDrizzle() private readonly db: Db,
     private readonly access: AccessService,
@@ -57,6 +62,10 @@ export class NotifyService implements OnModuleInit {
       if (!event.type.startsWith('approval.')) return;
       void this.sendApprovalEvent(event).catch(() => undefined);
     });
+    // Durable retry loop: claims due rows every minute, including after a restart.
+    this.timer = setInterval(() => void this.processQueue().catch(() => undefined), 60_000);
+    this.timer.unref?.();
+    setTimeout(() => void this.processQueue().catch(() => undefined), 2_000).unref?.();
   }
 
   config(user: SafeUser) {
@@ -136,8 +145,95 @@ export class NotifyService implements OnModuleInit {
       event.actorName ? `โดย: ${event.actorName}` : '',
     ].filter(Boolean);
     const text = lines.join('\n');
-    if (config.emailEnabled) await this.sendEmail(`SJP ERP — ${event.summary}`, text).catch(() => undefined);
-    if (config.lineEnabled) await this.sendLine(text).catch(() => undefined);
+    if (config.emailEnabled) this.enqueue('email', `SJP ERP — ${event.summary}`, text);
+    if (config.lineEnabled) this.enqueue('line', `SJP ERP — ${event.summary}`, text);
+  }
+
+  /** Queue a message so a transient SMTP/LINE failure is retried instead of lost. */
+  private enqueue(channel: 'email' | 'line', subject: string, body: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .insert(notifyQueue)
+      .values({
+        id: crypto.randomUUID(),
+        channel,
+        subject,
+        body,
+        status: 'pending',
+        attempts: 0,
+        nextAt: now,
+        lastError: '',
+        createdAt: now,
+        updatedAt: now,
+        sentAt: null,
+      })
+      .run();
+  }
+
+  queue(user: SafeUser) {
+    this.access.require(user, 'settings', 'view');
+    const items = this.db
+      .select()
+      .from(notifyQueue)
+      .orderBy(desc(notifyQueue.createdAt))
+      .limit(50)
+      .all();
+    return { items };
+  }
+
+  retry(user: SafeUser, id: string) {
+    this.access.require(user, 'settings', 'edit');
+    const row = this.db.select().from(notifyQueue).where(eq(notifyQueue.id, id)).all()[0];
+    if (!row) notFound('ไม่พบรายการในคิว');
+    const now = new Date().toISOString();
+    this.db
+      .update(notifyQueue)
+      .set({ status: 'pending', nextAt: now, updatedAt: now, lastError: '' })
+      .where(eq(notifyQueue.id, id))
+      .run();
+    return { ok: true, id };
+  }
+
+  /** Sends every due row. Safe to call from the minute timer or a retry action. */
+  async processQueue(): Promise<void> {
+    const now = new Date().toISOString();
+    const due = this.db
+      .select()
+      .from(notifyQueue)
+      .where(and(eq(notifyQueue.status, 'pending'), lte(notifyQueue.nextAt, now)))
+      .limit(20)
+      .all();
+    for (const row of due) await this.deliver(row);
+  }
+
+  private async deliver(row: typeof notifyQueue.$inferSelect): Promise<void> {
+    try {
+      if (row.channel === 'email') await this.sendEmail(row.subject, row.body);
+      else await this.sendLine(row.body);
+      const now = new Date().toISOString();
+      this.db
+        .update(notifyQueue)
+        .set({ status: 'sent', attempts: row.attempts + 1, lastError: '', sentAt: now, updatedAt: now })
+        .where(eq(notifyQueue.id, row.id))
+        .run();
+    } catch (error) {
+      const attempts = row.attempts + 1;
+      const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      const failed = attempts >= MAX_ATTEMPTS;
+      const wait = BACKOFF_MINUTES[Math.min(attempts - 1, BACKOFF_MINUTES.length - 1)] ?? 60;
+      const now = new Date();
+      this.db
+        .update(notifyQueue)
+        .set({
+          status: failed ? 'failed' : 'pending',
+          attempts,
+          lastError: message,
+          nextAt: failed ? row.nextAt : new Date(now.getTime() + wait * 60_000).toISOString(),
+          updatedAt: now.toISOString(),
+        })
+        .where(eq(notifyQueue.id, row.id))
+        .run();
+    }
   }
 
   private async sendEmail(subject: string, text: string): Promise<void> {
@@ -161,6 +257,9 @@ export class NotifyService implements OnModuleInit {
       port,
       secure,
       auth: user ? { user, pass } : undefined,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     });
     await transporter.sendMail({
       from: from || `SJP ERP <${user}>`,
@@ -179,10 +278,16 @@ export class NotifyService implements OnModuleInit {
     const to = config.lineTo || process.env.LINE_TO || '';
     if (!token) bad('ยังไม่ได้ตั้งค่า LINE channel access token');
     if (!to) bad('ยังไม่ได้ตั้งค่า LINE ปลายทาง');
-    const response = await fetch('https://api.line.me/v2/bot/message/push', {
+    const response = await fetch(LINE_PUSH_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ to, messages: [{ type: 'text', text: text.slice(0, 4900) }] }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw bad('ส่ง LINE ไม่สำเร็จ: หมดเวลารอปลายทาง');
+      }
+      throw bad('ส่ง LINE ไม่สำเร็จ: เชื่อมต่อปลายทางไม่ได้');
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');

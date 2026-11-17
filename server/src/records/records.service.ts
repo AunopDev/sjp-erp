@@ -241,36 +241,38 @@ export class RecordsService {
 
     const now = nowIso();
     const code = this.nextCode(def);
-    const row: typeof records.$inferInsert = {
-      id: crypto.randomUUID(),
-      entity: def.key,
-      code,
-      data,
-      deleted: false,
-      createdBy: options.actor?.id ?? user?.id ?? null,
-      createdAt: now,
-      updatedBy: options.actor?.id ?? user?.id ?? null,
-      updatedAt: now,
-    };
-    this.db.insert(records).values(row).run();
-    const decorated = this.decorate(def, row as RawRecord, user);
-    this.audit.log(options.actor ?? user, {
-      action: 'create',
-      entity: def.key,
-      recordId: row.id,
-      recordCode: code,
-      summary: options.summary ?? `สร้าง${def.label} ${code}`,
+    return this.db.transaction(() => {
+      const row: typeof records.$inferInsert = {
+        id: crypto.randomUUID(),
+        entity: def.key,
+        code,
+        data,
+        deleted: false,
+        createdBy: options.actor?.id ?? user?.id ?? null,
+        createdAt: now,
+        updatedBy: options.actor?.id ?? user?.id ?? null,
+        updatedAt: now,
+      };
+      this.db.insert(records).values(row).run();
+      const decorated = this.decorate(def, row as RawRecord, user);
+      this.audit.log(options.actor ?? user, {
+        action: 'create',
+        entity: def.key,
+        recordId: row.id,
+        recordCode: code,
+        summary: options.summary ?? `สร้าง${def.label} ${code}`,
+      });
+      this.events.publish({
+        type: 'record.created',
+        entity: def.key,
+        recordId: row.id,
+        code,
+        actor: options.actor ?? user,
+        summary: options.summary ?? `สร้าง${def.label} ${code}`,
+        payload: { title: def.title === 'code' ? code : String(decorated[def.title] ?? '') },
+      });
+      return decorated;
     });
-    this.events.publish({
-      type: 'record.created',
-      entity: def.key,
-      recordId: row.id,
-      code,
-      actor: options.actor ?? user,
-      summary: options.summary ?? `สร้าง${def.label} ${code}`,
-      payload: { title: def.title === 'code' ? code : String(decorated[def.title] ?? '') },
-    });
-    return decorated;
   }
 
   decideVehicleBooking(user: SafeUser, entityKey: string, id: string, decision: string, note = ''): DecoratedRecord {
@@ -320,34 +322,36 @@ export class RecordsService {
     this.validate(def, next, user, id);
     this.validateBusiness(def, next, id);
     const now = nowIso();
-    this.db
-      .update(records)
-      .set({ data: next, updatedAt: now, updatedBy: options.actor?.id ?? user.id })
-      .where(eq(records.id, id))
-      .run();
+    return this.db.transaction(() => {
+      this.db
+        .update(records)
+        .set({ data: next, updatedAt: now, updatedBy: options.actor?.id ?? user.id })
+        .where(eq(records.id, id))
+        .run();
 
-    const after = this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord, user);
-    const diff = options.changes ?? this.diff(def, before, next);
-    if (diff.length) {
-      this.audit.log(options.actor ?? user, {
-        action: 'update',
-        entity: def.key,
-        recordId: id,
-        recordCode: row.code,
-        summary: options.summary ?? `แก้ไข${def.label} ${row.code}`,
-        changes: diff,
-      });
-      this.events.publish({
-        type: 'record.updated',
-        entity: def.key,
-        recordId: id,
-        code: row.code,
-        actor: options.actor ?? user,
-        summary: options.summary ?? `แก้ไข${def.label} ${row.code}`,
-        payload: { changes: diff.slice(0, 20) },
-      });
-    }
-    return after;
+      const after = this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord, user);
+      const diff = options.changes ?? this.diff(def, before, next);
+      if (diff.length) {
+        this.audit.log(options.actor ?? user, {
+          action: 'update',
+          entity: def.key,
+          recordId: id,
+          recordCode: row.code,
+          summary: options.summary ?? `แก้ไข${def.label} ${row.code}`,
+          changes: diff,
+        });
+        this.events.publish({
+          type: 'record.updated',
+          entity: def.key,
+          recordId: id,
+          code: row.code,
+          actor: options.actor ?? user,
+          summary: options.summary ?? `แก้ไข${def.label} ${row.code}`,
+          payload: { changes: diff.slice(0, 20) },
+        });
+      }
+      return after;
+    });
   }
 
   private sameValue(left: unknown, right: unknown): boolean {
@@ -433,29 +437,31 @@ export class RecordsService {
     if (!row) notFound('ไม่พบรายการ');
     const next = { ...row.data, ...patch };
     const now = nowIso();
-    this.db
-      .update(records)
-      .set({ data: next, updatedAt: now, updatedBy: actor?.id ?? null })
-      .where(eq(records.id, id))
-      .run();
-    this.audit.log(actor, {
-      action: 'update',
-      entity: def.key,
-      recordId: id,
-      recordCode: row.code,
-      summary,
-      changes,
+    return this.db.transaction(() => {
+      this.db
+        .update(records)
+        .set({ data: next, updatedAt: now, updatedBy: actor?.id ?? null })
+        .where(eq(records.id, id))
+        .run();
+      this.audit.log(actor, {
+        action: 'update',
+        entity: def.key,
+        recordId: id,
+        recordCode: row.code,
+        summary,
+        changes,
+      });
+      this.events.publish({
+        type: 'record.updated',
+        entity: def.key,
+        recordId: id,
+        code: row.code,
+        actor,
+        summary,
+        payload: { changes: changes.slice(0, 20) },
+      });
+      return this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord, actor ?? undefined);
     });
-    this.events.publish({
-      type: 'record.updated',
-      entity: def.key,
-      recordId: id,
-      code: row.code,
-      actor,
-      summary,
-      payload: { changes: changes.slice(0, 20) },
-    });
-    return this.decorate(def, { ...row, data: next, updatedAt: now } as RawRecord, actor ?? undefined);
   }
 
   transition(
@@ -720,10 +726,18 @@ export class RecordsService {
   }
 
   private nextCode(def: EntityDef): string {
-    const row = this.db.select().from(counters).where(eq(counters.entity, def.key)).all()[0];
-    const value = (row?.value ?? 0) + 1;
-    if (row) this.db.update(counters).set({ value }).where(eq(counters.entity, def.key)).run();
-    else this.db.insert(counters).values({ entity: def.key, value }).run();
+    // Atomic upsert: SQLite increments the counter inside one statement, so two
+    // concurrent creates cannot read the same previous value.
+    const row = this.db
+      .insert(counters)
+      .values({ entity: def.key, value: 1 })
+      .onConflictDoUpdate({
+        target: counters.entity,
+        set: { value: sql`${counters.value} + 1` },
+      })
+      .returning({ value: counters.value })
+      .get();
+    const value = row?.value ?? 1;
     return `${def.prefix}-${String(value).padStart(4, '0')}`;
   }
 
